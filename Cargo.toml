@@ -1,0 +1,17 @@
+[package]
+name = "imosid"
+version = "0.1.0"
+authors = ["paperbenni <paperbenni@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[profile.release]
+codegen-units = 1
+panic = 'abort'
+
+[dependencies]
+clap = "3.0.0-beta.2"
+rand = "0.8.4"
+sha2 = "0.9.5"
+regex = "1.5.4"
