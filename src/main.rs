@@ -1,77 +1,104 @@
 use clap::{App, AppSettings, Arg};
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::BufRead;
 use std::io::{self, prelude::*};
-use std::os::unix::prelude::FileExt;
 use std::path::Path;
-use std::vec;
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum CommentType {
     SectionBegin,
     SectionEnd,
+    SourceInfo,
     HashInfo,
 }
 
+#[derive(Clone)]
 pub struct Specialcomment {
     line: u32,
-    string: String,
+    content: String,
+    section: String,
     ctype: CommentType,
-    argument: String,
+    argument: Option<String>,
 }
 
 impl Specialcomment {
     fn new(line: &str, commentsymbol: &str, linenumber: u32) -> Option<Specialcomment> {
         let mut iscomment = String::from("^ *");
         iscomment.push_str(&commentsymbol);
-        iscomment.push_str(" *... *([^ ]*) +([^ ]*).*");
+        iscomment.push_str(" *... *(.*)");
 
         let commentregex = Regex::new(&iscomment).unwrap();
+
         let keywords = commentregex.captures(&line);
         match keywords {
             Some(captures) => {
-                let keyword = captures.get(1).unwrap().as_str();
+                let keywords = keywords
+                    .unwrap()
+                    .get(1)
+                    .unwrap()
+                    .as_str()
+                    .split(" ")
+                    .collect::<Vec<&str>>();
+
+                // needs at least a section and a keyword
+                if keywords.len() < 2 {
+                    return Option::None;
+                }
+
+                let sectionname = keywords[0];
+                let keyword = keywords[1];
+                let cargument: Option<String>;
+
+                if keywords.len() > 2 {
+                    cargument = Option::Some(String::from(keywords[2]));
+                } else {
+                    cargument = Option::None;
+                }
+
                 println!("keyword {}", keyword);
-                let cargument: String;
                 let tmptype: CommentType;
                 match keyword {
                     "begin" => {
-                        if captures.len() >= 3 {
-                            cargument = String::from(captures.get(2).unwrap().as_str());
-                            tmptype = CommentType::SectionBegin;
-                        } else {
-                            println!("warning: missing section name on line {}", linenumber);
-                            return Option::None;
-                        }
+                        tmptype = CommentType::SectionBegin;
                     }
                     "end" => {
-                        if captures.len() >= 3 {
-                            cargument = String::from(captures.get(2).unwrap().as_str());
-                            tmptype = CommentType::SectionEnd;
-                        } else {
-                            println!("warning: missing section name on line {}", linenumber);
-                            return Option::None;
-                        }
+                        tmptype = CommentType::SectionEnd;
                     }
                     "hash" => {
-                        if captures.len() >= 3 {
-                            cargument = String::from(captures.get(2).unwrap().as_str());
-                            tmptype = CommentType::HashInfo;
-                        } else {
-                            println!("warning: missing hash on line {}", linenumber);
-                            return Option::None;
+                        tmptype = CommentType::HashInfo;
+                        match cargument {
+                            Some(_) => {}
+                            None => {
+                                println!("missing hash value on line {}", linenumber);
+                                return Option::None;
+                            }
                         }
                     }
+                    "source" => {
+                        tmptype = CommentType::SourceInfo;
+                        match cargument {
+                            Some(_) => {}
+                            None => {
+                                println!("missing source file on line {}", linenumber);
+                                return Option::None;
+                            }
+                        }
+                    }
+
                     &_ => {
                         println!("warning: incomplete imosid comment on {}", linenumber);
                         return Option::None;
                     }
                 }
+
                 Option::Some(Specialcomment {
                     line: linenumber,
-                    string: String::from(line),
+                    content: String::from(line),
+                    section: String::from(sectionname),
                     ctype: tmptype,
                     argument: cargument,
                 })
@@ -85,7 +112,7 @@ impl Specialcomment {
 
 pub struct Section {
     startline: u32,
-    name: String,
+    name: Option<String>,
     source: Option<String>,
     endline: u32,
     hash: String,
@@ -94,9 +121,9 @@ pub struct Section {
 }
 
 impl Section {
-    fn new(start: u32, name: String, source: Option<String>, end: u32) -> Section {
+    fn new(start: u32, end: u32, name: String, source: Option<String>) -> Section {
         Section {
-            name: String::from(name),
+            name: Option::Some(String::from(name)),
             startline: start,
             endline: end,
             source: source,
@@ -123,51 +150,45 @@ impl Specialfile {
             .unwrap();
 
         let mut commentvector = Vec::new();
-        let mut sectionvector = Vec::new();
         let mut counter = 0;
+
+        let sectionvector: Vec<Section> = Vec::new();
+
+        let mut sectionmap: HashMap<String, Vec<Specialcomment>> = HashMap::new();
+
         for i in io::BufReader::new(&sourcefile).lines() {
             counter += 1;
             let line = i.unwrap();
             let newcomment = Specialcomment::new(&line, "#", counter);
             match newcomment {
                 Some(comment) => {
-                    commentvector.push(comment);
+                    commentvector.push(comment.clone());
+                    if sectionmap.contains_key(&comment.section) {
+                        sectionmap.get_mut(&comment.section).unwrap().push(comment);
+                    } else {
+                        let mut sectionvector = Vec::new();
+                        sectionvector.push(comment.clone());
+                        sectionmap.insert(comment.section, sectionvector);
+                    }
                 }
                 None => {}
             }
         }
 
-        let currentname: String;
-        let mut sectionstack = Vec::new();
-        if commentvector.len() >= 2 {
-            for i in commentvector.iter() {
-                match i.ctype {
-                    CommentType::SectionBegin => {
-                        println!("starting section");
-                        sectionstack.push(i);
-                    }
-                    CommentType::SectionEnd => {
-                        println!("ending section");
-                        match sectionstack.pop() {
-                            Some(comment) => {
-                                if comment.argument == i.argument {
-                                    // closing section
-                                    let newsection = Section::new(
-                                        comment.line,
-                                        String::from(&comment.argument),
-                                        Option::None,
-                                        i.line,
-                                    );
-                                    sectionvector.push(newsection);
-                                }
-                            }
-                            None => {}
-                        }
-                    }
-                    CommentType::HashInfo => {
-                        println!("hash ingo");
-                    }
+        for (sectionname, svector) in sectionmap.iter() {
+            let mut checkmap = HashMap::new();
+            for i in svector.iter() {
+                if checkmap.contains_key(&i.ctype) {
+                    break;
+                } else {
+                    checkmap.insert(&i.ctype, i);
                 }
+            }
+            if !(checkmap.contains_key(&CommentType::SectionBegin)
+                && checkmap.contains_key(&CommentType::SectionEnd))
+            {
+                println!("warning: invalid section {}", sectionname);
+                continue;
             }
         }
 
@@ -261,5 +282,5 @@ fn main() {
         }
     }
     let tester = Specialcomment::new("# ... begin stuff", "#", 12).unwrap();
-    println!("argument {}", tester.argument);
+    println!("argument {}", tester.argument.unwrap());
 }
