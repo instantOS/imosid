@@ -34,17 +34,33 @@ impl Specialcomment {
             Some(captures) => {
                 let keyword = captures.get(1).unwrap().as_str();
                 println!("keyword {}", keyword);
+                let cargument: String;
+                let tmptype: CommentType;
                 match keyword {
                     "begin" => {
                         if captures.len() >= 3 {
-                            Option::Some(Specialcomment {
-                                line: linenumber,
-                                string: String::from(line),
-                                argument: String::from(captures.get(2).unwrap().as_str()),
-                                ctype: CommentType::SectionBegin,
-                            })
+                            cargument = String::from(captures.get(2).unwrap().as_str());
+                            tmptype = CommentType::SectionBegin;
                         } else {
                             println!("warning: missing section name on line {}", linenumber);
+                            return Option::None;
+                        }
+                    }
+                    "end" => {
+                        if captures.len() >= 3 {
+                            cargument = String::from(captures.get(2).unwrap().as_str());
+                            tmptype = CommentType::SectionEnd;
+                        } else {
+                            println!("warning: missing section name on line {}", linenumber);
+                            return Option::None;
+                        }
+                    }
+                    "hash" => {
+                        if captures.len() >= 3 {
+                            cargument = String::from(captures.get(2).unwrap().as_str());
+                            tmptype = CommentType::HashInfo;
+                        } else {
+                            println!("warning: missing hash on line {}", linenumber);
                             return Option::None;
                         }
                     }
@@ -53,6 +69,12 @@ impl Specialcomment {
                         return Option::None;
                     }
                 }
+                Option::Some(Specialcomment {
+                    line: linenumber,
+                    string: String::from(line),
+                    ctype: tmptype,
+                    argument: cargument,
+                })
             }
             None => {
                 return Option::None;
@@ -68,11 +90,27 @@ pub struct Section {
     endline: u32,
     hash: String,
     content: String,
+    broken: bool,
+}
+
+impl Section {
+    fn new(start: u32, name: String, source: Option<String>, end: u32) -> Section {
+        Section {
+            name: String::from(name),
+            startline: start,
+            endline: end,
+            source: source,
+            hash: String::from(""), //todo
+            broken: false,
+            content: String::from("asd"),
+        }
+    }
 }
 
 pub struct Specialfile {
     content: String,
-    specialcomments: Vec<Option<Specialcomment>>,
+    specialcomments: Vec<Specialcomment>,
+    sections: Vec<Section>,
     file: File,
 }
 
@@ -85,17 +123,58 @@ impl Specialfile {
             .unwrap();
 
         let mut commentvector = Vec::new();
+        let mut sectionvector = Vec::new();
         let mut counter = 0;
         for i in io::BufReader::new(&sourcefile).lines() {
             counter += 1;
             let line = i.unwrap();
             let newcomment = Specialcomment::new(&line, "#", counter);
-            commentvector.push(newcomment);
+            match newcomment {
+                Some(comment) => {
+                    commentvector.push(comment);
+                }
+                None => {}
+            }
+        }
+
+        let currentname: String;
+        let mut sectionstack = Vec::new();
+        if commentvector.len() >= 2 {
+            for i in commentvector.iter() {
+                match i.ctype {
+                    CommentType::SectionBegin => {
+                        println!("starting section");
+                        sectionstack.push(i);
+                    }
+                    CommentType::SectionEnd => {
+                        println!("ending section");
+                        match sectionstack.pop() {
+                            Some(comment) => {
+                                if comment.argument == i.argument {
+                                    // closing section
+                                    let newsection = Section::new(
+                                        comment.line,
+                                        String::from(&comment.argument),
+                                        Option::None,
+                                        i.line,
+                                    );
+                                    sectionvector.push(newsection);
+                                }
+                            }
+                            None => {}
+                        }
+                    }
+                    CommentType::HashInfo => {
+                        println!("hash ingo");
+                    }
+                }
+            }
         }
 
         let retfile = Specialfile {
             content: String::new(),
             specialcomments: commentvector,
+            sections: sectionvector,
             file: sourcefile,
         };
         return retfile;
