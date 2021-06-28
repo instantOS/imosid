@@ -131,10 +131,17 @@ impl Section {
             startline: start,
             endline: end,
             source: source,
-            hash: String::from(""), //todo
+            hash: String::new(),
             broken: false,
-            content: String::new(),
+            content: String::from(""),
         }
+    }
+
+    fn finalize(&mut self) {
+        let mut hasher = Sha256::new();
+        hasher.update(&self.content);
+        let hasher = hasher.finalize();
+        self.hash = String::from(format!("{:X}", hasher))
     }
 
     fn push_str(&mut self, line: &str) {
@@ -147,13 +154,15 @@ impl Section {
         match &self.name {
             Some(name) => {
                 outstr.push_str(&format!("{}... {} begin\n", commentsign, name));
-                outstr.push_str(&format!("{}... {} begin\n", commentsign, self.hash));
+                outstr.push_str(&format!("{}... {} hash {}\n", commentsign, name, self.hash));
                 match &self.source {
                     Some(source) => {
                         outstr.push_str(&format!("{}... {} begin\n", commentsign, source));
                     }
                     None => {}
                 } //todo: section target
+                outstr.push_str(&self.content);
+                outstr.push_str(&format!("{}... {} end\n", commentsign, name));
             }
             // anonymous section
             None => {
@@ -212,6 +221,7 @@ impl Specialfile {
             }
         }
 
+
         for (sectionname, svector) in sectionmap.iter() {
             let mut checkmap = HashMap::new();
             for i in svector.iter() {
@@ -254,21 +264,23 @@ impl Specialfile {
             currentline = i.endline + 1;
         }
 
+        sectionvector.extend(anonvector);
+        sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
+
         for i in &mut sectionvector {
             // TODO: speed this up, binary search or something
             for c in &contentvector {
-                if c.linenumber >= i.endline {
+                if c.linenumber > i.endline {
                     break;
                 } else if c.linenumber < i.startline {
                     continue;
                 }
                 i.push_str(&c.content);
             }
+            i.finalize();
         }
 
         println!("{}", contentvector.len());
-        sectionvector.extend(anonvector);
-        sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
 
         let retfile = Specialfile {
             content: String::new(),
@@ -277,6 +289,14 @@ impl Specialfile {
             file: sourcefile,
         };
         return retfile;
+    }
+
+    fn output(&self) -> String {
+        let mut retstr = String::new();
+        for i in &self.sections {
+            retstr.push_str(&i.output("#"));
+        }
+        return retstr;
     }
 }
 
@@ -361,6 +381,5 @@ fn main() {
     }
 
     let testfile = Specialfile::new("tester.txt");
-    println!("argument {}", testfile.sections[1].content);
-    println!("len {}", testfile.sections.len());
+    println!("output\n{}", testfile.output());
 }
