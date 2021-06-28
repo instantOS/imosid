@@ -25,7 +25,13 @@ pub struct Specialcomment {
     argument: Option<String>,
 }
 
+pub struct ContentLine {
+    linenumber: u32,
+    content: String,
+}
+
 impl Specialcomment {
+
     fn new(line: &str, commentsymbol: &str, linenumber: u32) -> Option<Specialcomment> {
         let mut iscomment = String::from("^ *");
         iscomment.push_str(&commentsymbol);
@@ -120,9 +126,9 @@ pub struct Section {
 }
 
 impl Section {
-    fn new(start: u32, end: u32, name: String, source: Option<String>) -> Section {
+    fn new(start: u32, end: u32, name: Option<String>, source: Option<String>) -> Section {
         Section {
-            name: Option::Some(String::from(name)),
+            name: name,
             startline: start,
             endline: end,
             source: source,
@@ -163,7 +169,7 @@ pub struct Specialfile {
 }
 
 impl Specialfile {
-    fn new(filename: String) -> Specialfile {
+    fn new(filename: &str) -> Specialfile {
         let sourcefile = OpenOptions::new()
             .read(true)
             .write(true)
@@ -174,10 +180,13 @@ impl Specialfile {
         let mut counter = 0;
 
         let mut sectionvector: Vec<Section> = Vec::new();
+        let mut contentvector: Vec<ContentLine> = Vec::new();
 
         let mut sectionmap: HashMap<String, Vec<Specialcomment>> = HashMap::new();
 
-        for i in io::BufReader::new(&sourcefile).lines() {
+        let filelines = io::BufReader::new(&sourcefile).lines();
+
+        for i in filelines {
             counter += 1;
             let line = i.unwrap();
             let newcomment = Specialcomment::new(&line, "#", counter);
@@ -192,7 +201,10 @@ impl Specialfile {
                         sectionmap.insert(comment.section, sectionvector);
                     }
                 }
-                None => {}
+                None => contentvector.push(ContentLine {
+                    linenumber: counter,
+                    content: line,
+                }),
             }
         }
 
@@ -215,12 +227,32 @@ impl Specialfile {
             let newsection = Section::new(
                 checkmap.get(&CommentType::SectionBegin).unwrap().line,
                 checkmap.get(&CommentType::SectionEnd).unwrap().line,
-                String::from(sectionname),
+                Option::Some(String::from(sectionname)),
                 Option::None, //todo
             );
 
             sectionvector.push(newsection);
         }
+
+        sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
+
+        let mut currentline = 1;
+        let mut tmpstart;
+        let mut tmpend;
+        let mut anonvector: Vec<Section> = Vec::new();
+        for i in &sectionvector {
+            if i.startline - currentline >= 1 {
+                tmpstart = currentline;
+                tmpend = i.startline - 1;
+                let newsection = Section::new(tmpstart, tmpend, Option::None, Option::None);
+                anonvector.push(newsection);
+            }
+            currentline = i.endline + 1;
+        }
+
+        println!("{}", contentvector.len());
+        sectionvector.extend(anonvector);
+        sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
 
         let retfile = Specialfile {
             content: String::new(),
@@ -311,6 +343,8 @@ fn main() {
             }
         }
     }
-    let tester = Specialcomment::new("# ... begin stuff", "#", 12).unwrap();
-    println!("argument {}", tester.argument.unwrap());
+
+    let testfile = Specialfile::new("tester.txt");
+    println!("argument {}", testfile.sections[0].name.clone().unwrap());
+    println!("len {}", testfile.sections.len());
 }
