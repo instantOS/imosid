@@ -294,7 +294,7 @@ impl Specialfile {
     }
 }
 
-fn main() {
+fn main() -> Result<(), std::io::Error> {
     let inputarg = Arg::new("input")
         .multiple_occurrences(true)
         .short('i')
@@ -354,10 +354,10 @@ fn main() {
     if matches.is_present("compile") {
         if let Some(ref matches) = matches.subcommand_matches("compile") {
             let filename = matches.value_of("file").unwrap();
-            println!("{}", filename);
-
             if Path::new(filename).is_file() {
-                let testfile = Specialfile::new("filename");
+                let testfile = Specialfile::new(filename);
+                let mut newfile = File::create(filename)?;
+                newfile.write_all(testfile.output().as_bytes())?;
             }
         }
     }
@@ -391,4 +391,5 @@ fn main() {
             }
         }
     }
+    Ok(())
 }
