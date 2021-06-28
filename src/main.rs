@@ -31,7 +31,6 @@ pub struct ContentLine {
 }
 
 impl Specialcomment {
-
     fn new(line: &str, commentsymbol: &str, linenumber: u32) -> Option<Specialcomment> {
         let mut iscomment = String::from("^ *");
         iscomment.push_str(&commentsymbol);
@@ -175,7 +174,6 @@ impl Section {
 }
 
 pub struct Specialfile {
-    content: String,
     specialcomments: Vec<Specialcomment>,
     sections: Vec<Section>,
     file: File,
@@ -220,7 +218,6 @@ impl Specialfile {
                 }),
             }
         }
-
 
         for (sectionname, svector) in sectionmap.iter() {
             let mut checkmap = HashMap::new();
@@ -280,10 +277,7 @@ impl Specialfile {
             i.finalize();
         }
 
-        println!("{}", contentvector.len());
-
         let retfile = Specialfile {
-            content: String::new(),
             specialcomments: commentvector,
             sections: sectionvector,
             file: sourcefile,
@@ -347,7 +341,12 @@ fn main() {
                         .index(1)
                         .about("file to search through")
                         .required(true)
-                ).arg(Arg::new("section").index(2).required(false).short('s')),
+                ).arg(
+                    Arg::new("section").
+                        required(false).short('s').
+                        long("section").
+                        multiple_occurrences(true).takes_value(true)
+                    ),
         )
         .setting(AppSettings::ColoredHelp)
         .get_matches();
@@ -358,28 +357,38 @@ fn main() {
             println!("{}", filename);
 
             if Path::new(filename).is_file() {
-                let mut linevec = Vec::new();
-                let mut contentstring = String::new();
-                let queryfile = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(filename)
-                    .unwrap();
-                let lines = io::BufReader::new(queryfile).lines();
-                for i in lines {
-                    let line = i.unwrap();
-                    linevec.push(line.clone());
-                    contentstring.push_str(&line);
-                    contentstring.push('\n');
-                }
-                let mut hasher = Sha256::new();
-                hasher.update(contentstring);
-                let hasher = hasher.finalize();
-                println!("{:X}", hasher);
+                let testfile = Specialfile::new("filename");
             }
         }
     }
 
-    let testfile = Specialfile::new("tester.txt");
-    println!("output\n{}", testfile.output());
+    if matches.is_present("query") {
+        if let Some(ref matches) = matches.subcommand_matches("query") {
+            let filename = matches.value_of("file").unwrap();
+
+            if Path::new(filename).is_file() {
+                let testfile = Specialfile::new(filename);
+
+                match matches.values_of("section") {
+                    Some(sections) => {
+                        let sections = sections.into_iter();
+                        for i in sections {
+                            for s in &testfile.sections {
+                                if let Some(name) = &s.name {
+                                    if name == i {
+                                        println!("{}", s.output("#"));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        println!("{}", testfile.output());
+                    }
+                }
+            } else {
+                eprintln!("file {} not found", filename);
+            }
+        }
+    }
 }
