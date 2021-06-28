@@ -64,7 +64,6 @@ impl Specialcomment {
                     cargument = Option::None;
                 }
 
-                println!("keyword {}", keyword);
                 let tmptype: CommentType;
                 match keyword {
                     "begin" => {
@@ -134,8 +133,13 @@ impl Section {
             source: source,
             hash: String::from(""), //todo
             broken: false,
-            content: String::from("replaceme"),
+            content: String::new(),
         }
+    }
+
+    fn push_str(&mut self, line: &str) {
+        self.content.push_str(line);
+        self.content.push('\n');
     }
 
     fn output(&self, commentsign: &str) -> String {
@@ -250,6 +254,18 @@ impl Specialfile {
             currentline = i.endline + 1;
         }
 
+        for i in &mut sectionvector {
+            // TODO: speed this up, binary search or something
+            for c in &contentvector {
+                if c.linenumber >= i.endline {
+                    break;
+                } else if c.linenumber < i.startline {
+                    continue;
+                }
+                i.push_str(&c.content);
+            }
+        }
+
         println!("{}", contentvector.len());
         sectionvector.extend(anonvector);
         sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
@@ -345,6 +361,6 @@ fn main() {
     }
 
     let testfile = Specialfile::new("tester.txt");
-    println!("argument {}", testfile.sections[0].name.clone().unwrap());
+    println!("argument {}", testfile.sections[1].content);
     println!("len {}", testfile.sections.len());
 }
