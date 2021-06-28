@@ -34,10 +34,9 @@ impl Specialcomment {
         let commentregex = Regex::new(&iscomment).unwrap();
 
         let keywords = commentregex.captures(&line);
-        match keywords {
+        match &keywords {
             Some(captures) => {
-                let keywords = keywords
-                    .unwrap()
+                let keywords = captures
                     .get(1)
                     .unwrap()
                     .as_str()
@@ -129,8 +128,30 @@ impl Section {
             source: source,
             hash: String::from(""), //todo
             broken: false,
-            content: String::from("asd"),
+            content: String::from("replaceme"),
         }
+    }
+
+    fn output(&self, commentsign: &str) -> String {
+        let mut outstr = String::new();
+        match &self.name {
+            Some(name) => {
+                outstr.push_str(&format!("{}... {} begin\n", commentsign, name));
+                outstr.push_str(&format!("{}... {} begin\n", commentsign, self.hash));
+                match &self.source {
+                    Some(source) => {
+                        outstr.push_str(&format!("{}... {} begin\n", commentsign, source));
+                    }
+                    None => {}
+                } //todo: section target
+            }
+            // anonymous section
+            None => {
+                outstr = self.content.clone();
+                return outstr;
+            }
+        }
+        return outstr;
     }
 }
 
@@ -152,7 +173,7 @@ impl Specialfile {
         let mut commentvector = Vec::new();
         let mut counter = 0;
 
-        let sectionvector: Vec<Section> = Vec::new();
+        let mut sectionvector: Vec<Section> = Vec::new();
 
         let mut sectionmap: HashMap<String, Vec<Specialcomment>> = HashMap::new();
 
@@ -190,6 +211,15 @@ impl Specialfile {
                 println!("warning: invalid section {}", sectionname);
                 continue;
             }
+
+            let newsection = Section::new(
+                checkmap.get(&CommentType::SectionBegin).unwrap().line,
+                checkmap.get(&CommentType::SectionEnd).unwrap().line,
+                String::from(sectionname),
+                Option::None, //todo
+            );
+
+            sectionvector.push(newsection);
         }
 
         let retfile = Specialfile {
