@@ -120,18 +120,27 @@ pub struct Section {
     endline: u32,
     hash: String,
     content: String,
-    broken: bool,
+    modified: bool,
 }
 
 impl Section {
-    fn new(start: u32, end: u32, name: Option<String>, source: Option<String>) -> Section {
+    fn new(
+        start: u32,
+        end: u32,
+        name: Option<String>,
+        source: Option<String>,
+        targethash: Option<String>,
+    ) -> Section {
         Section {
             name: name,
             startline: start,
             endline: end,
             source: source,
-            hash: String::new(),
-            broken: false,
+            hash: match targethash {
+                Some(hash) => hash,
+                None => String::new(),
+            },
+            modified: false,
             content: String::from(""),
         }
     }
@@ -140,7 +149,21 @@ impl Section {
         let mut hasher = Sha256::new();
         hasher.update(&self.content);
         let hasher = hasher.finalize();
-        self.hash = String::from(format!("{:X}", hasher))
+        let newhash = format!("{:X}", hasher);
+        match &self.name {
+            Some(_) => {
+                if self.hash == newhash {
+                    self.modified = false;
+                } else {
+                    self.modified = true;
+                }
+            }
+            // anonymous section
+            None => {
+                self.hash = newhash;
+            }
+        }
+        self.hash = String::from(format!("{:X}", hasher));
     }
 
     fn push_str(&mut self, line: &str) {
@@ -229,7 +252,8 @@ impl Specialfile {
                 }
             }
             if !(checkmap.contains_key(&CommentType::SectionBegin)
-                && checkmap.contains_key(&CommentType::SectionEnd))
+                && checkmap.contains_key(&CommentType::SectionEnd)
+                && checkmap.contains_key(&CommentType::HashInfo))
             {
                 println!("warning: invalid section {}", sectionname);
                 continue;
@@ -240,6 +264,15 @@ impl Specialfile {
                 checkmap.get(&CommentType::SectionEnd).unwrap().line,
                 Option::Some(String::from(sectionname)),
                 Option::None, //todo
+                Option::Some(
+                    checkmap
+                        .get(&CommentType::HashInfo)
+                        .unwrap()
+                        .argument
+                        .clone()
+                        .unwrap()
+                        .clone(),
+                ),
             );
 
             sectionvector.push(newsection);
@@ -255,7 +288,8 @@ impl Specialfile {
             if i.startline - currentline >= 1 {
                 tmpstart = currentline;
                 tmpend = i.startline - 1;
-                let newsection = Section::new(tmpstart, tmpend, Option::None, Option::None);
+                let newsection =
+                    Section::new(tmpstart, tmpend, Option::None, Option::None, Option::None);
                 anonvector.push(newsection);
             }
             currentline = i.endline + 1;
@@ -347,6 +381,10 @@ fn main() -> Result<(), std::io::Error> {
                         long("section").
                         multiple_occurrences(true).takes_value(true)
                     ),
+        ).subcommand(
+            App::new("info").about("list imosid metadata in file").arg(
+                Arg::new("file").index(1).required(true).about("file to get info for")
+            )
         )
         .setting(AppSettings::ColoredHelp)
         .get_matches();
@@ -358,6 +396,33 @@ fn main() -> Result<(), std::io::Error> {
                 let testfile = Specialfile::new(filename);
                 let mut newfile = File::create(filename)?;
                 newfile.write_all(testfile.output().as_bytes())?;
+            }
+        }
+    }
+
+    if matches.is_present("info") {
+        // todo: colored output
+        if let Some(ref matches) = matches.subcommand_matches("info") {
+            let filename = matches.value_of("file").unwrap();
+            if Path::new(filename).is_file() {
+                let infofile = Specialfile::new(filename);
+                for i in infofile.sections {
+                    if !i.name.is_some() {
+                        continue;
+                    }
+                    if i.modified {
+                        println!(
+                            "{}-{}: {} | modified",
+                            i.startline,
+                            i.endline,
+                            i.name.unwrap()
+                        );
+                    } else {
+                        println!("{}-{}: {} | Ok", i.startline, i.endline, i.name.unwrap());
+                    }
+                }
+            } else {
+                println!("file {} not found", filename);
             }
         }
     }
