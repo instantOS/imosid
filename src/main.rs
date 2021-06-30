@@ -218,7 +218,6 @@ impl Specialfile {
             .unwrap()
             .display()
             .to_string();
-        println!("source path {}", sourcepath);
 
         let sourcefile = OpenOptions::new()
             .read(true)
@@ -369,7 +368,7 @@ impl Specialfile {
         return retstr;
     }
 
-    fn applysection(&mut self, section: Section) {
+    fn applysection(&mut self, section: Section) -> bool {
         for i in 0..self.sections.len() {
             let tmpsection = self.sections.get(i).unwrap();
             if tmpsection.is_anonymous() || section.is_anonymous() {
@@ -377,11 +376,14 @@ impl Specialfile {
             }
             let tmpname = &tmpsection.name.clone().unwrap();
             if tmpname == &section.name.clone().unwrap() {
-                println!("updated section {}", tmpname);
+                if &tmpsection.hash == &section.hash {
+                    continue;
+                }
                 self.sections[i] = section;
-                return;
+                return true;
             }
         }
+        return false;
     }
 }
 
@@ -509,8 +511,24 @@ fn main() -> Result<(), std::io::Error> {
             let mut targetfile = get_special_file(matches, "target").unwrap();
             let inputfile = get_special_file(matches, "input").unwrap();
 
+            let mut modified = false;
+
             for i in inputfile.sections {
-                targetfile.applysection(i);
+                if targetfile.applysection(i) {
+                    modified = true;
+                }
+            }
+
+            if matches.is_present("print") {
+                println!("{}", targetfile.output());
+            } else {
+                if modified {
+                    let mut newfile = File::create(&targetfile.filename)?;
+                    newfile.write_all(targetfile.output().as_bytes())?;
+                    println!("updated file");
+                } else {
+                    println!("no updates necessary");
+                }
             }
         }
     }
