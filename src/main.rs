@@ -1,4 +1,4 @@
-use clap::{App, AppSettings, Arg};
+use clap::{App, AppSettings, Arg, ArgMatches};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -113,6 +113,7 @@ impl Specialcomment {
     }
 }
 
+#[derive(Clone)]
 pub struct Section {
     startline: u32,
     name: Option<String>,
@@ -142,6 +143,13 @@ impl Section {
             },
             modified: false,
             content: String::from(""),
+        }
+    }
+
+    fn is_anonymous(&self) -> bool {
+        match &self.name {
+            Some(_) => false,
+            None => true,
         }
     }
 
@@ -200,10 +208,18 @@ pub struct Specialfile {
     specialcomments: Vec<Specialcomment>,
     sections: Vec<Section>,
     file: File,
+    filename: String,
 }
 
 impl Specialfile {
     fn new(filename: &str) -> Specialfile {
+        let sourcepath = Path::new(filename)
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string();
+        println!("source path {}", sourcepath);
+
         let sourcefile = OpenOptions::new()
             .read(true)
             .write(true)
@@ -315,6 +331,7 @@ impl Specialfile {
             specialcomments: commentvector,
             sections: sectionvector,
             file: sourcefile,
+            filename: sourcepath,
         };
         return retfile;
     }
@@ -326,6 +343,30 @@ impl Specialfile {
         }
         return retstr;
     }
+
+    fn applysection(&mut self, section: Section) {
+        for i in 0..self.sections.len() {
+            let tmpsection = self.sections.get(i).unwrap();
+            if tmpsection.is_anonymous() || section.is_anonymous() {
+                continue;
+            }
+            let tmpname = &tmpsection.name.clone().unwrap();
+            if tmpname == &section.name.clone().unwrap() {
+                println!("updated section {}", tmpname);
+                self.sections[i] = section;
+                return;
+            }
+        }
+    }
+}
+
+fn get_special_file(matches: &ArgMatches, name: &str) -> Option<Specialfile> {
+    let filename = matches.value_of(name).unwrap();
+    if Path::new(filename).is_file() {
+        let retfile = Specialfile::new(filename);
+        return Some(retfile);
+    }
+    None
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -352,7 +393,14 @@ fn main() -> Result<(), std::io::Error> {
                         .index(1)
                         .required(true)
                         .about("file to apply updates to")
-                ).arg(
+                )
+                .arg(Arg::new("print")
+                        .short('p')
+                        .long("print")
+                        .required(false)
+                        .about("only print results, do not write to file")
+                        .takes_value(false))
+                .arg(
                     Arg::new("section").long("section")
                         .about("only update section <section>. all sections are included if unspecified")
                         .multiple_occurrences(true).takes_value(true).required(false)
@@ -423,6 +471,21 @@ fn main() -> Result<(), std::io::Error> {
                 }
             } else {
                 println!("file {} not found", filename);
+            }
+        }
+    }
+
+    if matches.is_present("update") {
+        if let Some(ref matches) = matches.subcommand_matches("update") {
+            if matches.value_of("target").unwrap() == matches.value_of("input").unwrap() {
+                return Ok(());
+            }
+
+            let mut targetfile = get_special_file(matches, "target").unwrap();
+            let inputfile = get_special_file(matches, "input").unwrap();
+
+            for i in inputfile.sections {
+                targetfile.applysection(i);
             }
         }
     }
