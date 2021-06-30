@@ -296,6 +296,31 @@ impl Specialfile {
 
         sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
 
+        // detect overlapping sections
+        let vecsize = sectionvector.len();
+        let mut broken_indices = Vec::new();
+        let mut skipnext = false;
+        for i in 0..vecsize {
+            if skipnext {
+                skipnext = false;
+                continue;
+            }
+            let currentsection = &sectionvector[i];
+            if i < vecsize - 1 {
+                let nextsection = &sectionvector[i + 1];
+                if nextsection.startline < currentsection.endline {
+                    broken_indices.push(i + 1);
+                    broken_indices.push(i);
+                    skipnext = true;
+                }
+            }
+        }
+
+        for i in broken_indices {
+            println!("section {} overlapping", i);
+            sectionvector.remove(i);
+        }
+
         let mut currentline = 1;
         let mut tmpstart;
         let mut tmpend;

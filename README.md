@@ -4,15 +4,9 @@ instant manager of sections in dotfiles
 
 Planned features
 
-- manage parts of files through comments
 - autodetect comment syntax for files
 - compare hashes of sections with upstream files
 - each section contains its own hash, dont update if hash doesnt match
-
-usage: imosid sourcefile target
-
-sourcefile has same sections, if hashes differ then section in target gets
-replaced with section from sourcefile
 
 ## Commands
 
