@@ -2,10 +2,12 @@ use clap::{App, AppSettings, Arg, ArgMatches};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::BufRead;
 use std::io::{self, prelude::*};
+use std::ops::Deref;
 use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -360,6 +362,98 @@ impl Specialfile {
         return retfile;
     }
 
+    fn get_comment_sign(&self) -> String {
+        let fpath = Path::new(&self.filename);
+
+        let mut file_name_commentsigns: HashMap<&str, &str> = HashMap::new();
+        file_name_commentsigns.insert("dunstrc", "#");
+        file_name_commentsigns.insert("zshrc", "#");
+        file_name_commentsigns.insert("bashrc", "#");
+        file_name_commentsigns.insert("Xresources", "!");
+
+        // get comment syntax via file name
+        let fname = fpath.file_name().and_then(OsStr::to_str);
+        match fname {
+            Some(name) => {
+                let filename = String::from(String::from(name).trim_start_matches("."));
+                match file_name_commentsigns.get(filename.as_str()) {
+                    Some(sign) => {
+                        return String::from(sign.deref());
+                    }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+
+        let mut file_type_commentsigns: HashMap<&str, &str> = HashMap::new();
+        file_type_commentsigns.insert("py", "#");
+        file_type_commentsigns.insert("sh", "#");
+        file_type_commentsigns.insert("zsh", "#");
+        file_type_commentsigns.insert("bash", "#");
+        file_type_commentsigns.insert("fish", "#");
+        file_type_commentsigns.insert("c", "//");
+        file_type_commentsigns.insert("cpp", "//");
+        file_type_commentsigns.insert("rasi", "//");
+        file_type_commentsigns.insert("desktop", "#");
+        file_type_commentsigns.insert("conf", "#");
+        file_type_commentsigns.insert("vim", "\"");
+        file_type_commentsigns.insert("reg", ";");
+        file_type_commentsigns.insert("ini", ";");
+
+        let ext = fpath.extension().and_then(OsStr::to_str);
+
+        // get comment syntax via file extension
+        match ext {
+            Some(extension) => {
+                let tester = file_type_commentsigns.get(extension);
+                match tester {
+                    Some(sign) => {
+                        return String::from(sign.deref());
+                    }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+
+        // get comment syntax via #!/hashbang
+
+        let mut file_hashbang_commentsigns: HashMap<&str, &str> = HashMap::new();
+
+        file_hashbang_commentsigns.insert("python", "#");
+        file_hashbang_commentsigns.insert("sh", "#");
+        file_hashbang_commentsigns.insert("bash", "#");
+        file_hashbang_commentsigns.insert("zsh", "#");
+        file_hashbang_commentsigns.insert("fish", "#");
+        file_hashbang_commentsigns.insert("node", "//");
+
+        let firstline = String::from(
+            self.sections
+                .get(0)
+                .unwrap()
+                .content
+                .split("\n")
+                .nth(0)
+                .unwrap(),
+        );
+
+        match Regex::new("^#!/.*[/ ](.*)$").unwrap().captures(&firstline) {
+            Some(captures) => {
+                let application = captures.get(1).unwrap().as_str();
+                match file_hashbang_commentsigns.get(application) {
+                    Some(sign) => {
+                        return String::from(sign.deref());
+                    }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+
+        return String::from("#");
+    }
+
     fn output(&self) -> String {
         let mut retstr = String::new();
         for i in &self.sections {
@@ -481,6 +575,8 @@ fn main() -> Result<(), std::io::Error> {
             let filename = matches.value_of("file").unwrap();
             if Path::new(filename).is_file() {
                 let infofile = Specialfile::new(filename);
+                let commentsign = infofile.get_comment_sign();
+                println!("comment syntax: {}", commentsign);
                 for i in infofile.sections {
                     if !i.name.is_some() {
                         continue;
