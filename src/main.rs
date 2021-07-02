@@ -232,6 +232,7 @@ pub struct Specialfile {
     file: File,
     filename: String,
     targetfile: Option<String>,
+    commentsign: String,
 }
 
 impl Specialfile {
@@ -259,11 +260,17 @@ impl Specialfile {
         let filelines = io::BufReader::new(&sourcefile).lines();
 
         let mut targetfile: Option<String> = Option::None;
+        let mut commentsign = String::new();
+        let mut hascommentsign = false;
 
         for i in filelines {
             counter += 1;
             let line = i.unwrap();
-            let newcomment = Specialcomment::new(&line, "#", counter);
+            if !hascommentsign {
+                commentsign = String::from(get_comment_sign(&sourcepath, &line));
+                hascommentsign = true;
+            }
+            let newcomment = Specialcomment::new(&line, &commentsign, counter);
             match newcomment {
                 Some(comment) => {
                     // comments with section all apply to the entire file
@@ -316,7 +323,7 @@ impl Specialfile {
                 checkmap.get(&CommentType::SectionBegin).unwrap().line,
                 checkmap.get(&CommentType::SectionEnd).unwrap().line,
                 Option::Some(String::from(sectionname)),
-                Option::None, //todo
+                Option::None, //source todo
                 Option::Some(
                     checkmap
                         .get(&CommentType::HashInfo)
@@ -395,100 +402,10 @@ impl Specialfile {
             file: sourcefile,
             filename: sourcepath,
             targetfile: targetfile,
+            commentsign: commentsign,
         };
+
         return retfile;
-    }
-
-    fn get_comment_sign(&self) -> String {
-        let fpath = Path::new(&self.filename);
-
-        let mut file_name_commentsigns: HashMap<&str, &str> = HashMap::new();
-        file_name_commentsigns.insert("dunstrc", "#");
-        file_name_commentsigns.insert("zshrc", "#");
-        file_name_commentsigns.insert("bashrc", "#");
-        file_name_commentsigns.insert("Xresources", "!");
-
-        // get comment syntax via file name
-        let fname = fpath.file_name().and_then(OsStr::to_str);
-        match fname {
-            Some(name) => {
-                let filename = String::from(String::from(name).trim_start_matches("."));
-                match file_name_commentsigns.get(filename.as_str()) {
-                    Some(sign) => {
-                        return String::from(sign.deref());
-                    }
-                    None => {}
-                }
-            }
-            None => {}
-        }
-
-        let mut file_type_commentsigns: HashMap<&str, &str> = HashMap::new();
-        file_type_commentsigns.insert("py", "#");
-        file_type_commentsigns.insert("sh", "#");
-        file_type_commentsigns.insert("zsh", "#");
-        file_type_commentsigns.insert("bash", "#");
-        file_type_commentsigns.insert("fish", "#");
-        file_type_commentsigns.insert("c", "//");
-        file_type_commentsigns.insert("cpp", "//");
-        file_type_commentsigns.insert("rasi", "//");
-        file_type_commentsigns.insert("desktop", "#");
-        file_type_commentsigns.insert("conf", "#");
-        file_type_commentsigns.insert("vim", "\"");
-        file_type_commentsigns.insert("reg", ";");
-        file_type_commentsigns.insert("ini", ";");
-
-        let ext = fpath.extension().and_then(OsStr::to_str);
-
-        // get comment syntax via file extension
-        match ext {
-            Some(extension) => {
-                let tester = file_type_commentsigns.get(extension);
-                match tester {
-                    Some(sign) => {
-                        return String::from(sign.deref());
-                    }
-                    None => {}
-                }
-            }
-            None => {}
-        }
-
-        // get comment syntax via #!/hashbang
-
-        let mut file_hashbang_commentsigns: HashMap<&str, &str> = HashMap::new();
-
-        file_hashbang_commentsigns.insert("python", "#");
-        file_hashbang_commentsigns.insert("sh", "#");
-        file_hashbang_commentsigns.insert("bash", "#");
-        file_hashbang_commentsigns.insert("zsh", "#");
-        file_hashbang_commentsigns.insert("fish", "#");
-        file_hashbang_commentsigns.insert("node", "//");
-
-        let firstline = String::from(
-            self.sections
-                .get(0)
-                .unwrap()
-                .content
-                .split("\n")
-                .nth(0)
-                .unwrap(),
-        );
-
-        match Regex::new("^#!/.*[/ ](.*)$").unwrap().captures(&firstline) {
-            Some(captures) => {
-                let application = captures.get(1).unwrap().as_str();
-                match file_hashbang_commentsigns.get(application) {
-                    Some(sign) => {
-                        return String::from(sign.deref());
-                    }
-                    None => {}
-                }
-            }
-            None => {}
-        }
-
-        return String::from("#");
     }
 
     fn output(&self) -> String {
@@ -510,7 +427,7 @@ impl Specialfile {
                 if Regex::new("^#!/.*").unwrap().is_match(&firstline) {
                     let mut newcontent = String::from(&firstline);
                     newcontent.push('\n');
-                    newcontent.push_str(&self.get_comment_sign());
+                    newcontent.push_str(&self.commentsign);
                     newcontent.push_str("... all target ");
                     newcontent.push_str(&(self.targetfile.clone().unwrap()));
                     newcontent.push('\n');
@@ -524,7 +441,7 @@ impl Specialfile {
                     firstsection = Option::Some(newcontent);
                 }
             } else {
-                let mut newcontent = String::from(self.get_comment_sign());
+                let mut newcontent = String::from(&self.commentsign);
                 newcontent.push_str("... all target");
                 newcontent.push_str(&(self.targetfile.clone().unwrap()));
                 newcontent.push('\n');
@@ -539,7 +456,7 @@ impl Specialfile {
                 retstr.push_str(&firstsection.unwrap());
                 firstsection = Option::None;
             } else {
-                retstr.push_str(&i.output("#")); //todo replace
+                retstr.push_str(&i.output(&self.commentsign));
             }
         }
         return retstr;
@@ -566,6 +483,88 @@ impl Specialfile {
         }
         return false;
     }
+}
+
+fn get_comment_sign(filename: &str, firstline: &str) -> String {
+    let fpath = Path::new(filename);
+
+    let mut file_name_commentsigns: HashMap<&str, &str> = HashMap::new();
+    file_name_commentsigns.insert("dunstrc", "#");
+    file_name_commentsigns.insert("zshrc", "#");
+    file_name_commentsigns.insert("bashrc", "#");
+    file_name_commentsigns.insert("Xresources", "!");
+
+    // get comment syntax via file name
+    let fname = fpath.file_name().and_then(OsStr::to_str);
+    match fname {
+        Some(name) => {
+            let filename = String::from(String::from(name).trim_start_matches("."));
+            match file_name_commentsigns.get(filename.as_str()) {
+                Some(sign) => {
+                    return String::from(sign.deref());
+                }
+                None => {}
+            }
+        }
+        None => {}
+    }
+
+    let mut file_type_commentsigns: HashMap<&str, &str> = HashMap::new();
+    file_type_commentsigns.insert("py", "#");
+    file_type_commentsigns.insert("sh", "#");
+    file_type_commentsigns.insert("zsh", "#");
+    file_type_commentsigns.insert("bash", "#");
+    file_type_commentsigns.insert("fish", "#");
+    file_type_commentsigns.insert("c", "//");
+    file_type_commentsigns.insert("cpp", "//");
+    file_type_commentsigns.insert("rasi", "//");
+    file_type_commentsigns.insert("desktop", "#");
+    file_type_commentsigns.insert("conf", "#");
+    file_type_commentsigns.insert("vim", "\"");
+    file_type_commentsigns.insert("reg", ";");
+    file_type_commentsigns.insert("ini", ";");
+
+    let ext = fpath.extension().and_then(OsStr::to_str);
+
+    // get comment syntax via file extension
+    match ext {
+        Some(extension) => {
+            let tester = file_type_commentsigns.get(extension);
+            match tester {
+                Some(sign) => {
+                    return String::from(sign.deref());
+                }
+                None => {}
+            }
+        }
+        None => {}
+    }
+
+    // get comment syntax via #!/hashbang
+
+    let mut file_hashbang_commentsigns: HashMap<&str, &str> = HashMap::new();
+
+    file_hashbang_commentsigns.insert("python", "#");
+    file_hashbang_commentsigns.insert("sh", "#");
+    file_hashbang_commentsigns.insert("bash", "#");
+    file_hashbang_commentsigns.insert("zsh", "#");
+    file_hashbang_commentsigns.insert("fish", "#");
+    file_hashbang_commentsigns.insert("node", "//");
+
+    match Regex::new("^#!/.*[/ ](.*)$").unwrap().captures(&firstline) {
+        Some(captures) => {
+            let application = captures.get(1).unwrap().as_str();
+            match file_hashbang_commentsigns.get(application) {
+                Some(sign) => {
+                    return String::from(sign.deref());
+                }
+                None => {}
+            }
+        }
+        None => {}
+    }
+
+    return String::from("#");
 }
 
 fn get_special_file(matches: &ArgMatches, name: &str) -> Option<Specialfile> {
@@ -662,7 +661,7 @@ fn main() -> Result<(), std::io::Error> {
             let filename = matches.value_of("file").unwrap();
             if Path::new(filename).is_file() {
                 let infofile = Specialfile::new(filename);
-                let commentsign = infofile.get_comment_sign();
+                let commentsign = &infofile.commentsign;
                 println!("comment syntax: {}", commentsign);
                 match infofile.targetfile {
                     Some(target) => {
@@ -736,7 +735,7 @@ fn main() -> Result<(), std::io::Error> {
                             for s in &testfile.sections {
                                 if let Some(name) = &s.name {
                                     if name == i {
-                                        println!("{}", s.output("#"));
+                                        println!("{}", s.output(&testfile.commentsign));
                                     }
                                 }
                             }
