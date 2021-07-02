@@ -2,6 +2,8 @@
 
 instant manager of sections in dotfiles
 
+[![asciicast](https://asciinema.org/a/423508.svg)](https://asciinema.org/a/423508)
+
 Planned features
 
 - autodetect comment syntax for files
