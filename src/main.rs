@@ -142,6 +142,7 @@ pub struct Section {
     source: Option<String>,
     endline: u32,
     hash: String,
+    targethash: Option<String>,
     content: String,
     modified: bool,
 }
@@ -159,13 +160,18 @@ impl Section {
             startline: start,
             endline: end,
             source: source,
-            hash: match targethash {
-                Some(hash) => hash,
+            hash: match &targethash {
+                Some(hash) => String::from(hash),
                 None => String::new(),
             },
+            targethash: targethash,
             modified: false,
             content: String::from(""),
         }
+    }
+
+    fn compile(&mut self) {
+        self.targethash = Option::Some(self.hash.clone());
     }
 
     fn is_anonymous(&self) -> bool {
@@ -206,7 +212,16 @@ impl Section {
         match &self.name {
             Some(name) => {
                 outstr.push_str(&format!("{}... {} begin\n", commentsign, name));
-                outstr.push_str(&format!("{}... {} hash {}\n", commentsign, name, self.hash));
+                outstr.push_str(&format!(
+                    "{}... {} hash {}\n",
+                    commentsign,
+                    name,
+                    if self.targethash.is_some() {
+                        self.targethash.clone().unwrap()
+                    } else {
+                        self.hash.clone()
+                    }
+                ));
                 match &self.source {
                     Some(source) => {
                         outstr.push_str(&format!("{}... {} begin\n", commentsign, source));
@@ -406,6 +421,12 @@ impl Specialfile {
         };
 
         return retfile;
+    }
+
+    fn compile(&mut self) {
+        for i in 0..self.sections.len() {
+            self.sections[i].compile();
+        }
     }
 
     fn output(&self) -> String {
@@ -648,7 +669,8 @@ fn main() -> Result<(), std::io::Error> {
         if let Some(ref matches) = matches.subcommand_matches("compile") {
             let filename = matches.value_of("file").unwrap();
             if Path::new(filename).is_file() {
-                let testfile = Specialfile::new(filename);
+                let mut testfile = Specialfile::new(filename);
+                testfile.compile();
                 let mut newfile = File::create(filename)?;
                 newfile.write_all(testfile.output().as_bytes())?;
             }
