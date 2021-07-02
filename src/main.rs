@@ -15,6 +15,7 @@ enum CommentType {
     SectionBegin,
     SectionEnd,
     SourceInfo,
+    TargetInfo,
     HashInfo,
 }
 
@@ -91,6 +92,25 @@ impl Specialcomment {
                                 println!("missing source file on line {}", linenumber);
                                 return Option::None;
                             }
+                        }
+                    }
+
+                    "target" => {
+                        if sectionname == "all" {
+                            tmptype = CommentType::TargetInfo;
+                            match cargument {
+                                Some(_) => {}
+                                None => {
+                                    println!("missing target value on line {}", linenumber);
+                                    return Option::None;
+                                }
+                            }
+                        } else {
+                            println!(
+                                "warning: target can only apply to the whole file {}",
+                                linenumber
+                            );
+                            return Option::None;
                         }
                     }
 
@@ -211,6 +231,7 @@ pub struct Specialfile {
     sections: Vec<Section>,
     file: File,
     filename: String,
+    targetfile: Option<String>,
 }
 
 impl Specialfile {
@@ -237,12 +258,27 @@ impl Specialfile {
 
         let filelines = io::BufReader::new(&sourcefile).lines();
 
+        let mut targetfile: Option<String> = Option::None;
+
         for i in filelines {
             counter += 1;
             let line = i.unwrap();
             let newcomment = Specialcomment::new(&line, "#", counter);
             match newcomment {
                 Some(comment) => {
+                    // comments with section all apply to the entire file
+                    if &comment.section == "all" {
+                        match &comment.ctype {
+                            CommentType::TargetInfo => {
+                                if comment.argument.is_some() {
+                                    targetfile =
+                                        Option::Some(String::from(&comment.argument.unwrap()));
+                                }
+                            }
+                            &_ => {}
+                        }
+                        continue;
+                    }
                     commentvector.push(comment.clone());
                     if sectionmap.contains_key(&comment.section) {
                         sectionmap.get_mut(&comment.section).unwrap().push(comment);
@@ -358,6 +394,7 @@ impl Specialfile {
             sections: sectionvector,
             file: sourcefile,
             filename: sourcepath,
+            targetfile: targetfile,
         };
         return retfile;
     }
@@ -456,8 +493,54 @@ impl Specialfile {
 
     fn output(&self) -> String {
         let mut retstr = String::new();
+        let mut firstsection: Option<String> = Option::None;
+
+        // respect hashbang
+        if self.targetfile.is_some() {
+            if self.sections.get(0).unwrap().is_anonymous() {
+                let firstline = String::from(
+                    self.sections
+                        .get(0)
+                        .unwrap()
+                        .content
+                        .split("\n")
+                        .nth(0)
+                        .unwrap(),
+                );
+                if Regex::new("^#!/.*").unwrap().is_match(&firstline) {
+                    let mut newcontent = String::from(&firstline);
+                    newcontent.push('\n');
+                    newcontent.push_str(&self.get_comment_sign());
+                    newcontent.push_str("... all target ");
+                    newcontent.push_str(&(self.targetfile.clone().unwrap()));
+                    newcontent.push('\n');
+                    newcontent.push_str(
+                        self.sections
+                            .get(0)
+                            .unwrap()
+                            .content
+                            .trim_start_matches(&firstline),
+                    );
+                    firstsection = Option::Some(newcontent);
+                }
+            } else {
+                let mut newcontent = String::from(self.get_comment_sign());
+                newcontent.push_str("... all target");
+                newcontent.push_str(&(self.targetfile.clone().unwrap()));
+                newcontent.push('\n');
+
+                newcontent.push_str(&self.sections.get(0).unwrap().content);
+                firstsection = Option::Some(newcontent);
+            }
+        }
+
         for i in &self.sections {
-            retstr.push_str(&i.output("#"));
+            if firstsection.is_some() {
+                retstr.push_str(&firstsection.unwrap());
+                firstsection = Option::None;
+            } else {
+                retstr.push_str(&i.output("#")); //todo replace
+            }
         }
         return retstr;
     }
@@ -465,7 +548,11 @@ impl Specialfile {
     fn applysection(&mut self, section: Section) -> bool {
         for i in 0..self.sections.len() {
             let tmpsection = self.sections.get(i).unwrap();
-            if tmpsection.is_anonymous() || section.is_anonymous() {
+            if tmpsection.is_anonymous()
+                || section.is_anonymous()
+                || section.modified
+                || tmpsection.modified
+            {
                 continue;
             }
             let tmpname = &tmpsection.name.clone().unwrap();
@@ -555,7 +642,7 @@ fn main() -> Result<(), std::io::Error> {
                 Arg::new("file").index(1).required(true).about("file to get info for")
             )
         )
-        .setting(AppSettings::ColoredHelp)
+        .setting(AppSettings::ColoredHelp).setting(AppSettings::ArgRequiredElseHelp)
         .get_matches();
 
     if matches.is_present("compile") {
@@ -577,6 +664,12 @@ fn main() -> Result<(), std::io::Error> {
                 let infofile = Specialfile::new(filename);
                 let commentsign = infofile.get_comment_sign();
                 println!("comment syntax: {}", commentsign);
+                match infofile.targetfile {
+                    Some(target) => {
+                        println!("target: {}", target);
+                    }
+                    None => {}
+                }
                 for i in infofile.sections {
                     if !i.name.is_some() {
                         continue;
