@@ -9,6 +9,7 @@ use std::io::BufRead;
 use std::io::{self, prelude::*};
 use std::ops::Deref;
 use std::path::Path;
+use std::process::exit;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum CommentType {
@@ -429,6 +430,29 @@ impl Specialfile {
         }
     }
 
+    fn write_to_file(&self) {
+        let newfile = File::create(&self.filename);
+        match newfile {
+            Err(_) => {
+                exit(1);
+            }
+            Ok(mut file) => {
+                file.write_all(self.output().as_bytes()).unwrap();
+            }
+        }
+    }
+
+    fn applyfile(&mut self, inputfile: &Specialfile) -> bool {
+        let mut modified = false;
+
+        for i in &inputfile.sections {
+            if self.applysection(i.clone()) {
+                modified = true;
+            }
+        }
+        return modified;
+    }
+
     fn output(&self) -> String {
         let mut retstr = String::new();
         let mut firstsection: Option<String> = Option::None;
@@ -661,6 +685,10 @@ fn main() -> Result<(), std::io::Error> {
             App::new("info").about("list imosid metadata in file").arg(
                 Arg::new("file").index(1).required(true).about("file to get info for")
             )
+        ).subcommand(
+            App::new("apply").about("apply source to target marked in the file").arg(
+                Arg::new("file").index(1).required(true).about("file to apply")
+            )
         )
         .setting(AppSettings::ColoredHelp).setting(AppSettings::ArgRequiredElseHelp)
         .get_matches();
@@ -671,8 +699,7 @@ fn main() -> Result<(), std::io::Error> {
             if Path::new(filename).is_file() {
                 let mut testfile = Specialfile::new(filename);
                 testfile.compile();
-                let mut newfile = File::create(filename)?;
-                newfile.write_all(testfile.output().as_bytes())?;
+                testfile.write_to_file();
             }
         }
     }
@@ -712,6 +739,29 @@ fn main() -> Result<(), std::io::Error> {
         }
     }
 
+    if matches.is_present("apply") {
+        // todo: create file with folder and all sections if not existing
+        if let Some(ref matches) = matches.subcommand_matches("apply") {
+            let sourcefile = get_special_file(&matches, "file");
+            if !sourcefile.is_some() {
+                // todo: error message
+                return Ok(());
+            }
+            let sourcefile = sourcefile.unwrap();
+            match &sourcefile.targetfile {
+                None => {
+                    println!("No target comment found in {}", &sourcefile.filename);
+                    return Ok(());
+                }
+                Some(targetname) => {
+                    let mut targetfile = Specialfile::new(&targetname);
+                    if targetfile.applyfile(&sourcefile) {
+                        targetfile.write_to_file();
+                    }
+                }
+            }
+        }
+    }
     if matches.is_present("update") {
         if let Some(ref matches) = matches.subcommand_matches("update") {
             if matches.value_of("target").unwrap() == matches.value_of("input").unwrap() {
