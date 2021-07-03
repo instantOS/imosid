@@ -469,20 +469,25 @@ impl Specialfile {
                         .nth(0)
                         .unwrap(),
                 );
+                let originalcontent = &self.sections.get(0).unwrap().content;
+
                 if Regex::new("^#!/.*").unwrap().is_match(&firstline) {
                     let mut newcontent = String::from(&firstline);
-                    newcontent.push('\n');
-                    newcontent.push_str(&self.commentsign);
-                    newcontent.push_str("... all target ");
-                    newcontent.push_str(&(self.targetfile.clone().unwrap()));
-                    newcontent.push('\n');
-                    newcontent.push_str(
-                        self.sections
-                            .get(0)
-                            .unwrap()
-                            .content
-                            .trim_start_matches(&firstline),
-                    );
+                    newcontent.push_str(&format!(
+                        "\n{}... all target {}\n",
+                        &self.commentsign,
+                        &(self.targetfile.clone().unwrap())
+                    ));
+                    // reappend original section content
+                    newcontent.push_str(originalcontent.trim_start_matches(&firstline));
+                    firstsection = Option::Some(newcontent);
+                } else {
+                    let mut newcontent = String::from(format!(
+                        "{}...all target {}\n",
+                        self.commentsign,
+                        self.targetfile.clone().unwrap()
+                    ));
+                    newcontent.push_str(originalcontent);
                     firstsection = Option::Some(newcontent);
                 }
             } else {
