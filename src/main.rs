@@ -36,6 +36,9 @@ pub struct ContentLine {
 
 impl Specialcomment {
     fn new(line: &str, commentsymbol: &str, linenumber: u32) -> Option<Specialcomment> {
+        if !line.starts_with(commentsymbol) {
+            return Option::None;
+        }
         let mut iscomment = String::from("^ *");
         iscomment.push_str(&commentsymbol);
         iscomment.push_str(" *\\.\\.\\. *(.*)");
@@ -69,7 +72,7 @@ impl Specialcomment {
 
                 let tmptype: CommentType;
                 match keyword {
-                    "begin" => {
+                    "begin" | "start" => {
                         tmptype = CommentType::SectionBegin;
                     }
                     "end" => {
@@ -418,7 +421,9 @@ impl Specialfile {
                 }
                 i.push_str(&c.content);
             }
-            i.finalize();
+            if !i.is_anonymous() {
+                i.finalize();
+            }
         }
 
         let retfile = Specialfile {
