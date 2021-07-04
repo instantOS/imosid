@@ -335,7 +335,7 @@ impl Specialfile {
                 checkmap.get(&CommentType::SectionBegin).unwrap().line,
                 checkmap.get(&CommentType::SectionEnd).unwrap().line,
                 Option::Some(String::from(sectionname)),
-                Option::None, //source todo
+                Option::None, //source TODO
                 Option::Some(
                     checkmap
                         .get(&CommentType::HashInfo)
@@ -377,24 +377,37 @@ impl Specialfile {
             sectionvector.remove(i);
         }
 
-        let mut currentline = 1;
-        let mut tmpstart;
-        let mut tmpend;
-        let mut anonvector: Vec<Section> = Vec::new();
-        for i in &sectionvector {
-            if i.startline - currentline >= 1 {
-                tmpstart = currentline;
-                tmpend = i.startline - 1;
-                let newsection =
-                    Section::new(tmpstart, tmpend, Option::None, Option::None, Option::None);
-                anonvector.push(newsection);
+        // introduce anonymous sections
+        if sectionvector.len() > 0 {
+            let mut currentline = 1;
+            let mut tmpstart;
+            let mut tmpend;
+            let mut anonvector: Vec<Section> = Vec::new();
+            for i in &sectionvector {
+                if i.startline - currentline >= 1 {
+                    tmpstart = currentline;
+                    tmpend = i.startline - 1;
+                    let newsection =
+                        Section::new(tmpstart, tmpend, Option::None, Option::None, Option::None);
+                    anonvector.push(newsection);
+                }
+                currentline = i.endline + 1;
             }
-            currentline = i.endline + 1;
+
+            sectionvector.extend(anonvector);
+            sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
+        } else {
+            let newsection = Section::new(
+                1,
+                contentvector.len() as u32,
+                Option::None,
+                Option::None,
+                Option::None,
+            );
+            sectionvector.push(newsection);
         }
 
-        sectionvector.extend(anonvector);
-        sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
-
+        // fill sections with content
         for i in &mut sectionvector {
             // TODO: speed this up, binary search or something
             for c in &contentvector {
