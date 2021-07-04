@@ -493,7 +493,7 @@ impl Specialfile {
                     firstsection = Option::Some(newcontent);
                 } else {
                     let mut newcontent = String::from(format!(
-                        "{}...all target {}\n",
+                        "{}... all target {}\n",
                         self.commentsign,
                         self.targetfile.clone().unwrap()
                     ));
@@ -581,9 +581,11 @@ fn get_comment_sign(filename: &str, firstline: &str) -> String {
 
     let mut file_name_commentsigns: HashMap<&str, &str> = HashMap::new();
     file_name_commentsigns.insert("dunstrc", "#");
+    file_name_commentsigns.insert("jgmenurc", "#");
     file_name_commentsigns.insert("zshrc", "#");
     file_name_commentsigns.insert("bashrc", "#");
     file_name_commentsigns.insert("Xresources", "!");
+    file_name_commentsigns.insert("vimrc", "\"");
 
     // get comment syntax via file name
     let fname = fpath.file_name().and_then(OsStr::to_str);
@@ -613,6 +615,7 @@ fn get_comment_sign(filename: &str, firstline: &str) -> String {
     file_type_commentsigns.insert("conf", "#");
     file_type_commentsigns.insert("vim", "\"");
     file_type_commentsigns.insert("reg", ";");
+    file_type_commentsigns.insert("rc", "#");
     file_type_commentsigns.insert("ini", ";");
 
     let ext = fpath.extension().and_then(OsStr::to_str);
