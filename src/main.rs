@@ -1,4 +1,5 @@
 use clap::{App, AppSettings, Arg, ArgMatches};
+use dirs::home_dir;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -9,7 +10,6 @@ use std::io::BufRead;
 use std::io::{self, prelude::*};
 use std::ops::Deref;
 use std::path::Path;
-use std::process::exit;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum CommentType {
@@ -434,7 +434,8 @@ impl Specialfile {
         let newfile = File::create(&self.filename);
         match newfile {
             Err(_) => {
-                exit(1);
+                println!("error: could not write to file {}", &self.filename);
+                panic!("write_to_file");
             }
             Ok(mut file) => {
                 file.write_all(self.output().as_bytes()).unwrap();
@@ -759,9 +760,29 @@ fn main() -> Result<(), std::io::Error> {
                     return Ok(());
                 }
                 Some(targetname) => {
-                    let mut targetfile = Specialfile::new(&targetname);
-                    if targetfile.applyfile(&sourcefile) {
+                    let checkpath = Path::new(&targetname);
+                    if !checkpath.is_file() {
+                        let bufpath = checkpath.to_path_buf();
+                        match bufpath.parent() {
+                            Some(parent) => {
+                                std::fs::create_dir_all(parent.to_str().unwrap()).unwrap();
+                            }
+                            None => {}
+                        }
+                        let targetfile: Specialfile = Specialfile {
+                            specialcomments: Vec::new(),
+                            sections: sourcefile.sections,
+                            file: sourcefile.file,
+                            filename: targetname.clone(),
+                            targetfile: Option::Some(targetname.clone()),
+                            commentsign: sourcefile.commentsign,
+                        };
                         targetfile.write_to_file();
+                    } else {
+                        let mut targetfile = Specialfile::new(&targetname);
+                        if targetfile.applyfile(&sourcefile) {
+                            targetfile.write_to_file();
+                        }
                     }
                 }
             }
