@@ -536,6 +536,18 @@ impl Specialfile {
     }
 }
 
+fn expand_tilde(input: &str) -> String {
+    let mut retstr = String::from(input);
+    if retstr.starts_with("~/") {
+        retstr = String::from(format!(
+            "{}/{}",
+            home_dir().unwrap().into_os_string().into_string().unwrap(),
+            retstr.strip_prefix("~/").unwrap()
+        ));
+    }
+    return retstr;
+}
+
 fn get_comment_sign(filename: &str, firstline: &str) -> String {
     let fpath = Path::new(filename);
 
@@ -720,7 +732,7 @@ fn main() -> Result<(), std::io::Error> {
                 println!("comment syntax: {}", commentsign);
                 match infofile.targetfile {
                     Some(target) => {
-                        println!("target: {}", target);
+                        println!("target: {}", &target);
                     }
                     None => {}
                 }
@@ -760,7 +772,9 @@ fn main() -> Result<(), std::io::Error> {
                     return Ok(());
                 }
                 Some(targetname) => {
-                    let checkpath = Path::new(&targetname);
+                    let realtargetname = expand_tilde(targetname);
+
+                    let checkpath = Path::new(&realtargetname);
                     if !checkpath.is_file() {
                         let bufpath = checkpath.to_path_buf();
                         match bufpath.parent() {
@@ -779,7 +793,7 @@ fn main() -> Result<(), std::io::Error> {
                         };
                         targetfile.write_to_file();
                     } else {
-                        let mut targetfile = Specialfile::new(&targetname);
+                        let mut targetfile = Specialfile::new(&realtargetname);
                         if targetfile.applyfile(&sourcefile) {
                             targetfile.write_to_file();
                         }
