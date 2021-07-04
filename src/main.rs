@@ -431,7 +431,7 @@ impl Specialfile {
     }
 
     fn write_to_file(&self) {
-        let newfile = File::create(&self.filename);
+        let newfile = File::create(&expand_tilde(&self.filename));
         match newfile {
             Err(_) => {
                 println!("error: could not write to file {}", &self.filename);
@@ -783,8 +783,9 @@ fn main() -> Result<(), std::io::Error> {
                             }
                             None => {}
                         }
+                        File::create(&realtargetname)?;
                         let targetfile: Specialfile = Specialfile {
-                            specialcomments: Vec::new(),
+                            specialcomments: sourcefile.specialcomments,
                             sections: sourcefile.sections,
                             file: sourcefile.file,
                             filename: targetname.clone(),
