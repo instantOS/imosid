@@ -617,6 +617,7 @@ fn get_comment_sign(filename: &str, firstline: &str) -> String {
     file_type_commentsigns.insert("reg", ";");
     file_type_commentsigns.insert("rc", "#");
     file_type_commentsigns.insert("ini", ";");
+    file_type_commentsigns.insert("xresources", "!");
 
     let ext = fpath.extension().and_then(OsStr::to_str);
 
