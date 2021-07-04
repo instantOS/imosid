@@ -157,15 +157,15 @@ impl Section {
         targethash: Option<String>,
     ) -> Section {
         Section {
-            name: name,
+            name,
             startline: start,
             endline: end,
-            source: source,
+            source,
             hash: match &targethash {
                 Some(hash) => String::from(hash),
                 None => String::new(),
             },
-            targethash: targethash,
+            targethash,
             modified: false,
             content: String::from(""),
         }
@@ -252,18 +252,14 @@ pub struct Specialfile {
 }
 
 impl Specialfile {
-    fn new(filename: &str) -> Specialfile {
+    fn new(filename: &str) -> Result<Specialfile, std::io::Error> {
         let sourcepath = Path::new(filename)
             .canonicalize()
             .unwrap()
             .display()
             .to_string();
 
-        let sourcefile = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(filename)
-            .unwrap();
+        let sourcefile = OpenOptions::new().read(true).write(true).open(filename)?;
 
         let mut commentvector = Vec::new();
         let mut counter = 0;
@@ -281,7 +277,7 @@ impl Specialfile {
 
         for i in filelines {
             counter += 1;
-            let line = i.unwrap();
+            let line = i?;
             if !hascommentsign {
                 commentsign = String::from(get_comment_sign(&sourcepath, &line));
                 hascommentsign = true;
@@ -417,11 +413,11 @@ impl Specialfile {
             sections: sectionvector,
             file: sourcefile,
             filename: sourcepath,
-            targetfile: targetfile,
-            commentsign: commentsign,
+            targetfile,
+            commentsign,
         };
 
-        return retfile;
+        return Ok(retfile);
     }
 
     fn compile(&mut self) {
@@ -649,7 +645,10 @@ fn get_comment_sign(filename: &str, firstline: &str) -> String {
     return String::from("#");
 }
 
-fn get_special_file(matches: &ArgMatches, name: &str) -> Option<Specialfile> {
+fn get_special_file(
+    matches: &ArgMatches,
+    name: &str,
+) -> Option<Result<Specialfile, std::io::Error>> {
     let filename = matches.value_of(name).unwrap();
     if Path::new(filename).is_file() {
         let retfile = Specialfile::new(filename);
@@ -738,7 +737,7 @@ fn main() -> Result<(), std::io::Error> {
         if let Some(ref matches) = matches.subcommand_matches("compile") {
             let filename = matches.value_of("file").unwrap();
             if Path::new(filename).is_file() {
-                let mut testfile = Specialfile::new(filename);
+                let mut testfile = Specialfile::new(filename)?;
                 testfile.compile();
                 testfile.write_to_file();
             }
@@ -750,7 +749,7 @@ fn main() -> Result<(), std::io::Error> {
         if let Some(ref matches) = matches.subcommand_matches("info") {
             let filename = matches.value_of("file").unwrap();
             if Path::new(filename).is_file() {
-                let infofile = Specialfile::new(filename);
+                let infofile = Specialfile::new(filename)?;
                 let commentsign = &infofile.commentsign;
                 println!("comment syntax: {}", commentsign);
                 match infofile.targetfile {
@@ -792,7 +791,10 @@ fn main() -> Result<(), std::io::Error> {
                     if Path::new(&tmpsourcepath).is_dir() {
                         continue;
                     }
-                    let tmpsource = Specialfile::new(&tmpsourcepath);
+                    let tmpsource = match Specialfile::new(&tmpsourcepath) {
+                        Ok(file) => file,
+                        Err(_) => continue,
+                    };
                     if tmpsource.targetfile.is_some() {
                         // todo: combine multiple sources applying to one file into one write
 
@@ -809,7 +811,11 @@ fn main() -> Result<(), std::io::Error> {
                             };
                             targetfile.write_to_file();
                         } else {
-                            let mut targetfile = Specialfile::new(&expand_tilde(&targetpath));
+                            let mut targetfile = match Specialfile::new(&expand_tilde(&targetpath))
+                            {
+                                Ok(file) => file,
+                                Err(_) => continue,
+                            };
                             if targetfile.applyfile(&tmpsource) {
                                 targetfile.write_to_file();
                             }
@@ -824,7 +830,7 @@ fn main() -> Result<(), std::io::Error> {
                 // todo: error message
                 return Ok(());
             }
-            let sourcefile = sourcefile.unwrap();
+            let sourcefile = sourcefile.unwrap()?;
             match &sourcefile.targetfile {
                 None => {
                     println!("No target comment found in {}", &sourcefile.filename);
@@ -843,7 +849,7 @@ fn main() -> Result<(), std::io::Error> {
                         };
                         targetfile.write_to_file();
                     } else {
-                        let mut targetfile = Specialfile::new(&realtargetname);
+                        let mut targetfile = Specialfile::new(&realtargetname)?;
                         if targetfile.applyfile(&sourcefile) {
                             targetfile.write_to_file();
                         }
@@ -858,8 +864,8 @@ fn main() -> Result<(), std::io::Error> {
                 return Ok(());
             }
 
-            let mut targetfile = get_special_file(matches, "target").unwrap();
-            let inputfile = get_special_file(matches, "input").unwrap();
+            let mut targetfile = get_special_file(matches, "target").unwrap()?;
+            let inputfile = get_special_file(matches, "input").unwrap()?;
 
             let mut modified = false;
 
@@ -888,7 +894,7 @@ fn main() -> Result<(), std::io::Error> {
             let filename = matches.value_of("file").unwrap();
 
             if Path::new(filename).is_file() {
-                let testfile = Specialfile::new(filename);
+                let testfile = Specialfile::new(filename)?;
 
                 match matches.values_of("section") {
                     Some(sections) => {
