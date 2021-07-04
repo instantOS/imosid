@@ -38,7 +38,7 @@ impl Specialcomment {
     fn new(line: &str, commentsymbol: &str, linenumber: u32) -> Option<Specialcomment> {
         let mut iscomment = String::from("^ *");
         iscomment.push_str(&commentsymbol);
-        iscomment.push_str(" *... *(.*)");
+        iscomment.push_str(" *\\.\\.\\. *(.*)");
 
         let commentregex = Regex::new(&iscomment).unwrap();
 
@@ -858,6 +858,7 @@ fn main() -> Result<(), std::io::Error> {
             }
         }
     }
+
     if matches.is_present("update") {
         if let Some(ref matches) = matches.subcommand_matches("update") {
             if matches.value_of("target").unwrap() == matches.value_of("input").unwrap() {
