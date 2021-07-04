@@ -536,6 +536,25 @@ impl Specialfile {
     }
 }
 
+fn create_file(path: &str) -> bool {
+    let realtargetname = expand_tilde(path);
+
+    let checkpath = Path::new(&realtargetname);
+    if !checkpath.is_file() {
+        let bufpath = checkpath.to_path_buf();
+        match bufpath.parent() {
+            Some(parent) => {
+                std::fs::create_dir_all(parent.to_str().unwrap()).unwrap();
+            }
+            None => {}
+        }
+        File::create(&realtargetname).unwrap();
+        return true;
+    } else {
+        return false;
+    }
+}
+
 fn expand_tilde(input: &str) -> String {
     let mut retstr = String::from(input);
     if retstr.starts_with("~/") {
@@ -706,7 +725,11 @@ fn main() -> Result<(), std::io::Error> {
         ).subcommand(
             App::new("apply").about("apply source to target marked in the file").arg(
                 Arg::new("file").index(1).required(true).about("file to apply")
-            )
+            ).arg(Arg::new("recursive")
+                  .about("recurively apply all files in the current directly")
+                  .takes_value(false)
+                  .required(false)
+                  .short('r'))
         )
         .setting(AppSettings::ColoredHelp).setting(AppSettings::ArgRequiredElseHelp)
         .get_matches();
@@ -760,6 +783,42 @@ fn main() -> Result<(), std::io::Error> {
     if matches.is_present("apply") {
         // todo: create file with folder and all sections if not existing
         if let Some(ref matches) = matches.subcommand_matches("apply") {
+            if matches.is_present("recursive") {
+                if !Path::new(&expand_tilde(matches.value_of("file").unwrap())).is_dir() {
+                    return Ok(());
+                }
+                for i in std::fs::read_dir(&matches.value_of("file").unwrap()).unwrap() {
+                    let tmpsourcepath = String::from(&i.unwrap().path().display().to_string());
+                    if Path::new(&tmpsourcepath).is_dir() {
+                        continue;
+                    }
+                    let tmpsource = Specialfile::new(&tmpsourcepath);
+                    if tmpsource.targetfile.is_some() {
+                        // todo: combine multiple sources applying to one file into one write
+
+                        let targetpath = String::from(&tmpsource.targetfile.clone().unwrap());
+                        println!("applying file {} to {}", &tmpsource.filename, &targetpath);
+                        if create_file(&targetpath) {
+                            let targetfile: Specialfile = Specialfile {
+                                specialcomments: tmpsource.specialcomments,
+                                sections: tmpsource.sections,
+                                filename: targetpath.clone(),
+                                targetfile: Option::Some(targetpath),
+                                commentsign: tmpsource.commentsign,
+                                file: tmpsource.file,
+                            };
+                            targetfile.write_to_file();
+                        } else {
+                            let mut targetfile = Specialfile::new(&expand_tilde(&targetpath));
+                            if targetfile.applyfile(&tmpsource) {
+                                targetfile.write_to_file();
+                            }
+                        }
+                    }
+                }
+                return Ok(());
+            }
+
             let sourcefile = get_special_file(&matches, "file");
             if !sourcefile.is_some() {
                 // todo: error message
@@ -773,17 +832,7 @@ fn main() -> Result<(), std::io::Error> {
                 }
                 Some(targetname) => {
                     let realtargetname = expand_tilde(targetname);
-
-                    let checkpath = Path::new(&realtargetname);
-                    if !checkpath.is_file() {
-                        let bufpath = checkpath.to_path_buf();
-                        match bufpath.parent() {
-                            Some(parent) => {
-                                std::fs::create_dir_all(parent.to_str().unwrap()).unwrap();
-                            }
-                            None => {}
-                        }
-                        File::create(&realtargetname)?;
+                    if create_file(targetname) {
                         let targetfile: Specialfile = Specialfile {
                             specialcomments: sourcefile.specialcomments,
                             sections: sourcefile.sections,
