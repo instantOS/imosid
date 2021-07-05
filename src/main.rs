@@ -338,7 +338,10 @@ impl Specialfile {
                 checkmap.get(&CommentType::SectionBegin).unwrap().line,
                 checkmap.get(&CommentType::SectionEnd).unwrap().line,
                 Option::Some(String::from(sectionname)),
-                Option::None, //source TODO
+                match checkmap.get(&CommentType::SourceInfo) {
+                    Some(source) => Some(String::from(source.argument.clone().unwrap())),
+                    None => None,
+                },
                 Option::Some(
                     checkmap
                         .get(&CommentType::HashInfo)
@@ -784,16 +787,21 @@ fn main() -> Result<(), std::io::Error> {
                     if !i.name.is_some() {
                         continue;
                     }
+                    let mut outstr: String;
+                    outstr = format!("{}-{}: {} | ", i.startline, i.endline, i.name.unwrap());
                     if i.modified {
-                        println!(
-                            "{}-{}: {} | modified",
-                            i.startline,
-                            i.endline,
-                            i.name.unwrap()
-                        );
+                        outstr.push_str("modified");
                     } else {
-                        println!("{}-{}: {} | Ok", i.startline, i.endline, i.name.unwrap());
+                        outstr.push_str("ok");
                     }
+                    match i.source {
+                        Some(source) => {
+                            outstr.push_str(" | source ");
+                            outstr.push_str(&source);
+                        }
+                        None => {}
+                    }
+                    println!("{}", &outstr);
                 }
             } else {
                 println!("file {} not found", filename);
@@ -802,7 +810,6 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if matches.is_present("apply") {
-        // todo: create file with folder and all sections if not existing
         if let Some(ref matches) = matches.subcommand_matches("apply") {
             if matches.is_present("recursive") {
                 if !Path::new(&expand_tilde(matches.value_of("file").unwrap())).is_dir() {
