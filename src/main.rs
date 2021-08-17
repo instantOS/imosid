@@ -10,6 +10,7 @@ use std::io::BufRead;
 use std::io::{self, prelude::*};
 use std::ops::Deref;
 use std::path::Path;
+use colored::Colorize;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum CommentType {
