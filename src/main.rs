@@ -152,6 +152,8 @@ pub struct Section {
     modified: bool,
 }
 
+// sections that files get divided into
+// these can be independently updated or broken
 impl Section {
     fn new(
         start: u32,
@@ -175,10 +177,13 @@ impl Section {
         }
     }
 
+    // set target hash to current hash
     fn compile(&mut self) {
         self.targethash = Option::Some(self.hash.clone());
     }
 
+    // anonymous sections are sections without marker comments
+    // e.g. parts not tracked by imosid
     fn is_anonymous(&self) -> bool {
         match &self.name {
             Some(_) => false,
@@ -186,6 +191,8 @@ impl Section {
         }
     }
 
+    // generate section hash
+    // and detect section status
     fn finalize(&mut self) {
         let mut hasher = Sha256::new();
         hasher.update(&self.content);
@@ -207,11 +214,13 @@ impl Section {
         self.hash = String::from(format!("{:X}", hasher));
     }
 
+    // append string to content
     fn push_str(&mut self, line: &str) {
         self.content.push_str(line);
         self.content.push('\n');
     }
 
+    // return entire section with formatted marker comments and content
     fn output(&self, commentsign: &str) -> String {
         let mut outstr = String::new();
         match &self.name {
@@ -554,6 +563,9 @@ impl Specialfile {
     }
 }
 
+// create file with directory creation and
+// parsing of the home tilde
+// MAYBETODO: support environment variables
 fn create_file(path: &str) -> bool {
     let realtargetname = expand_tilde(path);
 
@@ -573,6 +585,7 @@ fn create_file(path: &str) -> bool {
     }
 }
 
+// expand tilde in path into the home folder
 fn expand_tilde(input: &str) -> String {
     let mut retstr = String::from(input);
     if retstr.starts_with("~/") {
@@ -585,6 +598,7 @@ fn expand_tilde(input: &str) -> String {
     return retstr;
 }
 
+// detect comment syntax for file based on filename, extension and hashbang
 fn get_comment_sign(filename: &str, firstline: &str) -> String {
     let fpath = Path::new(filename);
 
@@ -671,6 +685,7 @@ fn get_comment_sign(filename: &str, firstline: &str) -> String {
     return String::from("#");
 }
 
+// return specialfile from specific part of the program arguments
 fn get_special_file(
     matches: &ArgMatches,
     name: &str,
@@ -684,6 +699,8 @@ fn get_special_file(
 }
 
 fn main() -> Result<(), std::io::Error> {
+
+    // argument definition for specifying imosid file
     let inputarg = Arg::new("input")
         .multiple_occurrences(true)
         .short('i')
@@ -692,6 +709,7 @@ fn main() -> Result<(), std::io::Error> {
         .required(false)
         .about("add file to source list");
 
+    // parse program arguments using clap
     let matches = App::new("imosid")
         .version("0.1")
         .author("paperbenni <paperbenni@gmail.com>")
@@ -771,7 +789,6 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if matches.is_present("info") {
-        // todo: colored output
         if let Some(ref matches) = matches.subcommand_matches("info") {
             let filename = matches.value_of("file").unwrap();
             if Path::new(filename).is_file() {
@@ -791,9 +808,9 @@ fn main() -> Result<(), std::io::Error> {
                     let mut outstr: String;
                     outstr = format!("{}-{}: {} | ", i.startline, i.endline, i.name.unwrap());
                     if i.modified {
-                        outstr.push_str("modified");
+                        outstr.push_str(&"modified".red());
                     } else {
-                        outstr.push_str("ok");
+                        outstr.push_str(&"ok".green());
                     }
                     match i.source {
                         Some(source) => {
@@ -857,7 +874,7 @@ fn main() -> Result<(), std::io::Error> {
 
             let sourcefile = get_special_file(&matches, "file");
             if !sourcefile.is_some() {
-                // todo: error message
+                eprintln!("error: cannot open file");
                 return Ok(());
             }
             let sourcefile = sourcefile.unwrap()?;
