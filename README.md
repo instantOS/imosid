@@ -53,7 +53,6 @@ of the same file
 Insert/modify a hash comment to match the section content and create an
 unmodified section. Used to create files that are used as update sources
 
-
 ## Section syntax
 
 Imosid supports a wide range of different file formats and adapts to using the

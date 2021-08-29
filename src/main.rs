@@ -1,16 +1,19 @@
 use clap::{App, AppSettings, Arg, ArgMatches};
+use colored::Colorize;
 use dirs::home_dir;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::fs::read_to_string;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::BufRead;
 use std::io::{self, prelude::*};
 use std::ops::Deref;
 use std::path::Path;
-use colored::Colorize;
+use std::path::PathBuf;
+use toml::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum CommentType {
@@ -35,6 +38,7 @@ pub struct ContentLine {
     content: String,
 }
 
+// parse
 impl Specialcomment {
     fn new(line: &str, commentsymbol: &str, linenumber: u32) -> Option<Specialcomment> {
         if !line.starts_with(commentsymbol) {
@@ -99,7 +103,6 @@ impl Specialcomment {
                             }
                         }
                     }
-
                     "target" => {
                         if sectionname == "all" {
                             tmptype = CommentType::TargetInfo;
@@ -255,12 +258,70 @@ impl Section {
     }
 }
 
+pub struct Metafile {
+    targetfile: Option<String>,
+    sourcefile: Option<String>,
+    hash: String,
+    parentfile: String,
+}
+
+impl Metafile {
+    fn new(path: PathBuf) -> Option<Metafile> {
+        if !path.is_file() {
+            return None;
+        }
+        let metacontent = read_to_string(path);
+        match metacontent {
+            Err(_) => {
+                return None;
+            }
+            Ok(content) => {
+                let value = content.parse::<Value>().unwrap();
+
+                let mut retfile = Metafile {
+                    targetfile: None,
+                    sourcefile: None,
+                    hash: String::from(""),
+                    parentfile: String::from(""),
+                };
+
+                for key in ["hash", "parentfile", "target", "source"] {
+                    if let Some(Value::String(_)) = value.get(key) {
+                    } else {
+                        eprintln!("error in metafile");
+                        return None;
+                    }
+                }
+
+                if let Some(hash) = value.get("hash") {
+                    retfile.hash = hash.to_string();
+                }
+
+                if let Some(parentfile) = value.get("parentfile") {
+                    retfile.parentfile = parentfile.to_string();
+                }
+
+                if let Some(targetfile) = value.get("target") {
+                    retfile.targetfile = Some(targetfile.to_string());
+                }
+
+                if let Some(sourcefile) = value.get("source") {
+                    retfile.sourcefile = Some(sourcefile.to_string());
+                }
+
+                return Some(retfile);
+            }
+        };
+    }
+}
+
 pub struct Specialfile {
     specialcomments: Vec<Specialcomment>,
     sections: Vec<Section>,
     file: File,
     filename: String,
     targetfile: Option<String>,
+    metafile: Option<Metafile>,
     commentsign: String,
 }
 
@@ -446,6 +507,7 @@ impl Specialfile {
             filename: sourcepath,
             targetfile,
             commentsign,
+            metafile: None,
         };
 
         return Ok(retfile);
@@ -699,7 +761,6 @@ fn get_special_file(
 }
 
 fn main() -> Result<(), std::io::Error> {
-
     // argument definition for specifying imosid file
     let inputarg = Arg::new("input")
         .multiple_occurrences(true)
@@ -709,6 +770,13 @@ fn main() -> Result<(), std::io::Error> {
         .required(false)
         .about("add file to source list");
 
+    let metafilearg = Arg::new("metafile")
+        .required(false)
+        .short('m')
+        .long("metafile")
+        .takes_value(false)
+        .about("put imosid metadata into a separate file instead of using comments in the file");
+
     // parse program arguments using clap
     let matches = App::new("imosid")
         .version("0.1")
@@ -717,7 +785,7 @@ fn main() -> Result<(), std::io::Error> {
         .arg(Arg::new("syntax").required(false).about("manually set the comment syntax"))
         .subcommand(
             App::new("update")
-                .about("apply source sections to target")
+                .about("apply source sections to target").arg(&metafilearg)
                 .arg(
                     inputarg
                 ).arg(
@@ -740,7 +808,7 @@ fn main() -> Result<(), std::io::Error> {
         ).subcommand(
             App::new("compile")
                 .about("add hashes to sections in source file")
-                .setting(AppSettings::ColoredHelp)
+                .setting(AppSettings::ColoredHelp).arg(&metafilearg)
                 .arg(
                     Arg::new("file")
                         .index(1)
@@ -768,7 +836,7 @@ fn main() -> Result<(), std::io::Error> {
         ).subcommand(
             App::new("apply").about("apply source to target marked in the file").arg(
                 Arg::new("file").index(1).required(true).about("file to apply")
-            ).arg(Arg::new("recursive")
+            ).arg(&metafilearg).arg(Arg::new("recursive")
                   .about("recurively apply all files in the current directly")
                   .takes_value(false)
                   .required(false)
@@ -788,6 +856,7 @@ fn main() -> Result<(), std::io::Error> {
         }
     }
 
+    // show imosid information about file
     if matches.is_present("info") {
         if let Some(ref matches) = matches.subcommand_matches("info") {
             let filename = matches.value_of("file").unwrap();
@@ -893,6 +962,7 @@ fn main() -> Result<(), std::io::Error> {
                             filename: targetname.clone(),
                             targetfile: Option::Some(targetname.clone()),
                             commentsign: sourcefile.commentsign,
+                            metafile: None,
                         };
                         targetfile.write_to_file();
                     } else {
