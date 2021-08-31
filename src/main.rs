@@ -2,17 +2,14 @@ use clap::{App, AppSettings, Arg, ArgMatches};
 use colored::Colorize;
 use dirs::home_dir;
 use regex::Regex;
+use semver::Version;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fs::read_to_string;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::BufRead;
-use std::io::{self, prelude::*};
+use std::fs::{read_to_string, File, OpenOptions};
+use std::io::{self, prelude::*, BufRead};
 use std::ops::Deref;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use toml::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -259,10 +256,13 @@ impl Section {
 }
 
 pub struct Metafile {
-    targetfile: Option<String>,
-    sourcefile: Option<String>,
     hash: String,
     parentfile: String,
+    targetfile: Option<String>,
+    sourcefile: Option<String>,
+    imosidversion: Version,
+    syntaxversion: u32,
+    value: Value,
 }
 
 impl Metafile {
@@ -283,35 +283,67 @@ impl Metafile {
                     sourcefile: None,
                     hash: String::from(""),
                     parentfile: String::from(""),
+                    imosidversion: Version::new(0, 0, 0),
+                    syntaxversion: 1,
+                    value: value.clone(),
                 };
 
-                for key in ["hash", "parentfile", "target", "source"] {
-                    if let Some(Value::String(_)) = value.get(key) {
-                    } else {
-                        eprintln!("error in metafile");
-                        return None;
-                    }
+                // hash and parent are mandatory
+                if let Some(Value::String(hash)) = value.get("hash") {
+                    retfile.hash = String::from(hash);
+                } else {
+                    return None;
                 }
 
-                if let Some(hash) = value.get("hash") {
-                    retfile.hash = hash.to_string();
+                if let Some(Value::String(parentfile)) = value.get("parent") {
+                    retfile.parentfile = String::from(parentfile);
+                } else {
+                    return None;
                 }
 
-                if let Some(parentfile) = value.get("parentfile") {
-                    retfile.parentfile = parentfile.to_string();
+                if let Some(Value::String(targetfile)) = value.get("target") {
+                    retfile.targetfile = Some(String::from(targetfile));
                 }
 
-                if let Some(targetfile) = value.get("target") {
-                    retfile.targetfile = Some(targetfile.to_string());
-                }
-
-                if let Some(sourcefile) = value.get("source") {
-                    retfile.sourcefile = Some(sourcefile.to_string());
+                if let Some(Value::String(sourcefile)) = value.get("source") {
+                    retfile.sourcefile = Some(String::from(sourcefile));
                 }
 
                 return Some(retfile);
             }
         };
+    }
+
+    // populate toml value with data
+    fn update(&mut self) {
+        let mut selfmap = toml::map::Map::new();
+        selfmap.insert(
+            String::from("hash"),
+            Value::String(String::from(&self.hash)),
+        );
+        selfmap.insert(
+            String::from("parent"),
+            Value::String(String::from(&self.parentfile)),
+        );
+        if let Some(targetfile) = &self.targetfile {
+            selfmap.insert(
+                String::from("target"),
+                Value::String(String::from(targetfile)),
+            );
+        }
+        if let Some(sourcefile) = &self.sourcefile {
+            selfmap.insert(
+                String::from("source"),
+                Value::String(String::from(sourcefile)),
+            );
+        }
+
+        selfmap.insert(String::from("syntaxversion"), Value::Integer(0));
+        //TODO this is a placeholder
+        selfmap.insert(
+            String::from("imosidversion"),
+            Value::String(Version::new(0, 0, 0).to_string()),
+        );
     }
 }
 
@@ -334,6 +366,7 @@ impl Specialfile {
             .to_string();
 
         let sourcefile = OpenOptions::new().read(true).write(true).open(filename)?;
+        let mut metafile = Option::None;
 
         let mut commentvector = Vec::new();
         let mut counter = 0;
@@ -343,160 +376,181 @@ impl Specialfile {
 
         let mut sectionmap: HashMap<String, Vec<Specialcomment>> = HashMap::new();
 
-        let filelines = io::BufReader::new(&sourcefile).lines();
-
         let mut targetfile: Option<String> = Option::None;
         let mut commentsign = String::new();
         let mut hascommentsign = false;
 
-        for i in filelines {
-            counter += 1;
-            let line = i?;
-            if !hascommentsign {
-                commentsign = String::from(get_comment_sign(&sourcepath, &line));
-                hascommentsign = true;
-            }
-            let newcomment = Specialcomment::new(&line, &commentsign, counter);
-            match newcomment {
-                Some(comment) => {
-                    // comments with section all apply to the entire file
-                    if &comment.section == "all" {
-                        match &comment.ctype {
-                            CommentType::TargetInfo => {
-                                if comment.argument.is_some() {
-                                    targetfile =
-                                        Option::Some(String::from(&comment.argument.unwrap()));
-                                }
-                            }
-                            &_ => {}
-                        }
-                        continue;
-                    }
-                    commentvector.push(comment.clone());
-                    if sectionmap.contains_key(&comment.section) {
-                        sectionmap.get_mut(&comment.section).unwrap().push(comment);
-                    } else {
-                        let mut sectionvector = Vec::new();
-                        sectionvector.push(comment.clone());
-                        sectionmap.insert(comment.section, sectionvector);
-                    }
-                }
-                None => contentvector.push(ContentLine {
-                    linenumber: counter,
-                    content: line,
-                }),
-            }
-        }
-
-        for (sectionname, svector) in sectionmap.iter() {
-            let mut checkmap = HashMap::new();
-            for i in svector.iter() {
-                if checkmap.contains_key(&i.ctype) {
-                    break;
-                } else {
-                    checkmap.insert(&i.ctype, i);
-                }
-            }
-            if !(checkmap.contains_key(&CommentType::SectionBegin)
-                && checkmap.contains_key(&CommentType::SectionEnd)
-                && checkmap.contains_key(&CommentType::HashInfo))
-            {
-                println!("warning: invalid section {}", sectionname);
-                continue;
-            }
-
-            let newsection = Section::new(
-                checkmap.get(&CommentType::SectionBegin).unwrap().line,
-                checkmap.get(&CommentType::SectionEnd).unwrap().line,
-                Option::Some(String::from(sectionname)),
-                match checkmap.get(&CommentType::SourceInfo) {
-                    Some(source) => Some(String::from(source.argument.clone().unwrap())),
-                    None => None,
-                },
-                Option::Some(
-                    checkmap
-                        .get(&CommentType::HashInfo)
-                        .unwrap()
-                        .argument
-                        .clone()
-                        .unwrap()
-                        .clone(),
-                ),
-            );
-
-            sectionvector.push(newsection);
-        }
-
-        sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
-
-        // detect overlapping sections
-        let vecsize = sectionvector.len();
-        let mut broken_indices = Vec::new();
-        let mut skipnext = false;
-        for i in 0..vecsize {
-            if skipnext {
-                skipnext = false;
-                continue;
-            }
-            let currentsection = &sectionvector[i];
-            if i < vecsize - 1 {
-                let nextsection = &sectionvector[i + 1];
-                if nextsection.startline < currentsection.endline {
-                    broken_indices.push(i + 1);
-                    broken_indices.push(i);
-                    skipnext = true;
-                }
-            }
-        }
-
-        for i in broken_indices {
-            println!("section {} overlapping", i);
-            sectionvector.remove(i);
-        }
-
-        // introduce anonymous sections
-        if sectionvector.len() > 0 {
-            let mut currentline = 1;
-            let mut tmpstart;
-            let mut tmpend;
-            let mut anonvector: Vec<Section> = Vec::new();
-            for i in &sectionvector {
-                if i.startline - currentline >= 1 {
-                    tmpstart = currentline;
-                    tmpend = i.startline - 1;
-                    let newsection =
-                        Section::new(tmpstart, tmpend, Option::None, Option::None, Option::None);
-                    anonvector.push(newsection);
-                }
-                currentline = i.endline + 1;
-            }
-
-            sectionvector.extend(anonvector);
-            sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
+        // check for metafile
+        if Path::new(&format!("{}.imosid.toml", sourcepath)).is_file() {
+            let mut contentstring = String::new();
+            io::BufReader::new(&sourcefile).read_to_string(&mut contentstring)?;
+            let mut hasher = Sha256::new();
+            hasher.update(&contentstring);
+            let hasher = hasher.finalize();
+            let hashstring = format!("{:X}", hasher);
+            println!("metafile exists \n{}", hashstring);
+            metafile = Metafile::new(PathBuf::from(&format!("{}.imosid.toml", sourcepath)));
         } else {
-            let newsection = Section::new(
-                1,
-                contentvector.len() as u32,
-                Option::None,
-                Option::None,
-                Option::None,
-            );
-            sectionvector.push(newsection);
-        }
+            let filelines = io::BufReader::new(&sourcefile).lines();
 
-        // fill sections with content
-        for i in &mut sectionvector {
-            // TODO: speed this up, binary search or something
-            for c in &contentvector {
-                if c.linenumber > i.endline {
-                    break;
-                } else if c.linenumber < i.startline {
+            // parse lines for special comments
+            for i in filelines {
+                counter += 1;
+                let line = i?;
+                if !hascommentsign {
+                    commentsign = String::from(get_comment_sign(&sourcepath, &line));
+                    hascommentsign = true;
+                }
+                let newcomment = Specialcomment::new(&line, &commentsign, counter);
+                match newcomment {
+                    Some(comment) => {
+                        // comments with section all apply to the entire file
+                        if &comment.section == "all" {
+                            match &comment.ctype {
+                                CommentType::TargetInfo => {
+                                    if comment.argument.is_some() {
+                                        targetfile =
+                                            Option::Some(String::from(&comment.argument.unwrap()));
+                                    }
+                                }
+                                &_ => {}
+                            }
+                            continue;
+                        }
+                        commentvector.push(comment.clone());
+                        if sectionmap.contains_key(&comment.section) {
+                            sectionmap.get_mut(&comment.section).unwrap().push(comment);
+                        } else {
+                            let mut sectionvector = Vec::new();
+                            sectionvector.push(comment.clone());
+                            sectionmap.insert(comment.section, sectionvector);
+                        }
+                    }
+                    None => contentvector.push(ContentLine {
+                        linenumber: counter,
+                        content: line,
+                    }),
+                }
+            }
+
+            // validate sections and initialze section structs
+            for (sectionname, svector) in sectionmap.iter() {
+                let mut checkmap = HashMap::new();
+                // sections cannot have multiple hashes, beginnings etc
+                for i in svector.iter() {
+                    if checkmap.contains_key(&i.ctype) {
+                        break;
+                    } else {
+                        checkmap.insert(&i.ctype, i);
+                    }
+                }
+                if !(checkmap.contains_key(&CommentType::SectionBegin)
+                    && checkmap.contains_key(&CommentType::SectionEnd)
+                    && checkmap.contains_key(&CommentType::HashInfo))
+                {
+                    println!("warning: invalid section {}", sectionname);
                     continue;
                 }
-                i.push_str(&c.content);
+
+                let newsection = Section::new(
+                    checkmap.get(&CommentType::SectionBegin).unwrap().line,
+                    checkmap.get(&CommentType::SectionEnd).unwrap().line,
+                    Option::Some(String::from(sectionname)),
+                    match checkmap.get(&CommentType::SourceInfo) {
+                        Some(source) => Some(String::from(source.argument.clone().unwrap())),
+                        None => None,
+                    },
+                    Option::Some(
+                        checkmap
+                            .get(&CommentType::HashInfo)
+                            .unwrap()
+                            .argument
+                            .clone()
+                            .unwrap()
+                            .clone(),
+                    ),
+                );
+
+                sectionvector.push(newsection);
             }
-            if !i.is_anonymous() {
-                i.finalize();
+
+            // sort sections by lines (retaining the original order of the file)
+            sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
+
+            // detect overlapping sections
+            let vecsize = sectionvector.len();
+            let mut broken_indices = Vec::new();
+            let mut skipnext = false;
+            for i in 0..vecsize {
+                if skipnext {
+                    skipnext = false;
+                    continue;
+                }
+                let currentsection = &sectionvector[i];
+                if i < vecsize - 1 {
+                    let nextsection = &sectionvector[i + 1];
+                    if nextsection.startline < currentsection.endline {
+                        broken_indices.push(i + 1);
+                        broken_indices.push(i);
+                        skipnext = true;
+                    }
+                }
+            }
+
+            for i in broken_indices {
+                println!("section {} overlapping", i);
+                sectionvector.remove(i);
+            }
+
+            // introduce anonymous sections
+            if sectionvector.len() > 0 {
+                let mut currentline = 1;
+                let mut tmpstart;
+                let mut tmpend;
+                let mut anonvector: Vec<Section> = Vec::new();
+                for i in &sectionvector {
+                    if i.startline - currentline >= 1 {
+                        tmpstart = currentline;
+                        tmpend = i.startline - 1;
+                        let newsection = Section::new(
+                            tmpstart,
+                            tmpend,
+                            Option::None,
+                            Option::None,
+                            Option::None,
+                        );
+                        anonvector.push(newsection);
+                    }
+                    currentline = i.endline + 1;
+                }
+
+                sectionvector.extend(anonvector);
+                sectionvector.sort_by(|a, b| a.startline.cmp(&b.startline));
+            } else {
+                let newsection = Section::new(
+                    1,
+                    contentvector.len() as u32,
+                    Option::None,
+                    Option::None,
+                    Option::None,
+                );
+                sectionvector.push(newsection);
+            }
+
+            // fill sections with content
+            for i in &mut sectionvector {
+                // TODO: speed this up, binary search or something
+                for c in &contentvector {
+                    if c.linenumber > i.endline {
+                        break;
+                    } else if c.linenumber < i.startline {
+                        continue;
+                    }
+                    i.push_str(&c.content);
+                }
+                if !i.is_anonymous() {
+                    i.finalize();
+                }
             }
         }
 
@@ -507,19 +561,21 @@ impl Specialfile {
             filename: sourcepath,
             targetfile,
             commentsign,
-            metafile: None,
+            metafile,
         };
 
         return Ok(retfile);
     }
 
     fn compile(&mut self) {
+        //TODO metafile
         for i in 0..self.sections.len() {
             self.sections[i].compile();
         }
     }
 
     fn write_to_file(&self) {
+        //TODO metafile
         let newfile = File::create(&expand_tilde(&self.filename));
         match newfile {
             Err(_) => {
@@ -533,6 +589,7 @@ impl Specialfile {
     }
 
     fn applyfile(&mut self, inputfile: &Specialfile) -> bool {
+        //TODO metafile
         let mut modified = false;
 
         for i in &inputfile.sections {
@@ -544,6 +601,7 @@ impl Specialfile {
     }
 
     fn output(&self) -> String {
+        //TODO metafile
         let mut retstr = String::new();
         let mut firstsection: Option<String> = Option::None;
 
@@ -603,6 +661,7 @@ impl Specialfile {
     }
 
     fn applysection(&mut self, section: Section) -> bool {
+        //TODO metafile
         for i in 0..self.sections.len() {
             let tmpsection = self.sections.get(i).unwrap();
             if tmpsection.is_anonymous()
@@ -924,6 +983,7 @@ fn main() -> Result<(), std::io::Error> {
                                 targetfile: Option::Some(targetpath),
                                 commentsign: tmpsource.commentsign,
                                 file: tmpsource.file,
+                                metafile: None,
                             };
                             targetfile.write_to_file();
                         } else {
