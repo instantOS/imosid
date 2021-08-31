@@ -70,6 +70,16 @@ Example
 ```
 This marks the beginning of the section hello world
 
+## Metafiles
+
+Some file formats do not allow for comments either because they have no defined
+comment syntax or because the application using the the file removes comments.
+In order to still provide some imosid functioality to these files metadata files
+record information about the dotfile in a separate file called
+filename.imosid.toml. This approach is severely limited when compared to using
+in-file comments. There is no support for having multiple sections or applying
+specific sections.
+
 ## Commands
 
 ### Update

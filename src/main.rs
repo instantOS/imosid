@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{read_to_string, File, OpenOptions};
-use std::io::{self, prelude::*, BufRead};
+use std::io::{self, prelude::*, BufRead, ErrorKind};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use toml::Value;
@@ -260,13 +260,15 @@ pub struct Metafile {
     parentfile: String,
     targetfile: Option<String>,
     sourcefile: Option<String>,
+    modified: bool,
     imosidversion: Version,
     syntaxversion: u32,
     value: Value,
+    content: String,
 }
 
 impl Metafile {
-    fn new(path: PathBuf) -> Option<Metafile> {
+    fn new(path: PathBuf, content: &str) -> Option<Metafile> {
         if !path.is_file() {
             return None;
         }
@@ -286,6 +288,8 @@ impl Metafile {
                     imosidversion: Version::new(0, 0, 0),
                     syntaxversion: 1,
                     value: value.clone(),
+                    content: String::from(content),
+                    modified: false,
                 };
 
                 // hash and parent are mandatory
@@ -312,6 +316,23 @@ impl Metafile {
                 return Some(retfile);
             }
         };
+    }
+
+    fn get_content_hash(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(&self.content);
+        let hasher = hasher.finalize();
+        format!("{:X}", hasher)
+    }
+
+    // check for modifications
+    fn finalize(&mut self) {
+        self.modified = self.hash != self.get_content_hash();
+    }
+
+    fn compile(&mut self) {
+        self.hash = self.get_content_hash();
+        self.modified = false;
     }
 
     // populate toml value with data
@@ -345,6 +366,11 @@ impl Metafile {
             Value::String(Version::new(0, 0, 0).to_string()),
         );
     }
+
+    fn output(&mut self) -> String {
+        self.update();
+        self.value.to_string()
+    }
 }
 
 pub struct Specialfile {
@@ -366,7 +392,7 @@ impl Specialfile {
             .to_string();
 
         let sourcefile = OpenOptions::new().read(true).write(true).open(filename)?;
-        let mut metafile = Option::None;
+        let metafile;
 
         let mut commentvector = Vec::new();
         let mut counter = 0;
@@ -384,12 +410,25 @@ impl Specialfile {
         if Path::new(&format!("{}.imosid.toml", sourcepath)).is_file() {
             let mut contentstring = String::new();
             io::BufReader::new(&sourcefile).read_to_string(&mut contentstring)?;
-            let mut hasher = Sha256::new();
-            hasher.update(&contentstring);
-            let hasher = hasher.finalize();
-            let hashstring = format!("{:X}", hasher);
-            println!("metafile exists \n{}", hashstring);
-            metafile = Metafile::new(PathBuf::from(&format!("{}.imosid.toml", sourcepath)));
+
+            metafile = if let Some(mut metafile) = Metafile::new(
+                PathBuf::from(&format!("{}.imosid.toml", sourcepath)),
+                &contentstring,
+            ) {
+                metafile.finalize();
+                metafile
+            } else {
+                return Err(std::io::Error::new(ErrorKind::Other, "invalid metafile"));
+            };
+            return Ok(Specialfile {
+                specialcomments: commentvector,
+                sections: sectionvector,
+                file: sourcefile,
+                filename: sourcepath,
+                targetfile: metafile.targetfile.clone(),
+                metafile: Some(metafile),
+                commentsign: String::from(""),
+            });
         } else {
             let filelines = io::BufReader::new(&sourcefile).lines();
 
@@ -561,107 +600,137 @@ impl Specialfile {
             filename: sourcepath,
             targetfile,
             commentsign,
-            metafile,
+            metafile: None,
         };
 
         return Ok(retfile);
     }
 
     fn compile(&mut self) {
-        //TODO metafile
-        for i in 0..self.sections.len() {
-            self.sections[i].compile();
+        if let None = self.metafile {
+            for i in 0..self.sections.len() {
+                self.sections[i].compile();
+            }
         }
     }
 
     fn write_to_file(&self) {
-        //TODO metafile
         let newfile = File::create(&expand_tilde(&self.filename));
         match newfile {
             Err(_) => {
                 println!("error: could not write to file {}", &self.filename);
                 panic!("write_to_file");
             }
-            Ok(mut file) => {
-                file.write_all(self.output().as_bytes()).unwrap();
-            }
+            Ok(mut file) => match &self.metafile {
+                None => {
+                    file.write_all(self.output().as_bytes()).unwrap();
+                }
+                Some(metafile) => {
+                    file.write_all(metafile.content.as_bytes()).unwrap();
+                }
+            },
         }
     }
 
     fn applyfile(&mut self, inputfile: &Specialfile) -> bool {
-        //TODO metafile
-        let mut modified = false;
+        match &self.metafile {
+            None => {
+                //if no sections are updated, don't do anything to the file system
+                let mut modified = false;
 
-        for i in &inputfile.sections {
-            if self.applysection(i.clone()) {
-                modified = true;
+                for i in &inputfile.sections {
+                    if self.applysection(i.clone()) {
+                        modified = true;
+                    }
+                }
+                return modified;
+            }
+
+            Some(metafile) => {
+                //TODO
+                return false;
             }
         }
-        return modified;
     }
 
     fn output(&self) -> String {
-        //TODO metafile
-        let mut retstr = String::new();
-        let mut firstsection: Option<String> = Option::None;
 
-        // respect hashbang
-        if self.targetfile.is_some() {
-            if self.sections.get(0).unwrap().is_anonymous() {
-                let firstline = String::from(
-                    self.sections
-                        .get(0)
-                        .unwrap()
-                        .content
-                        .split("\n")
-                        .nth(0)
-                        .unwrap(),
-                );
-                let originalcontent = &self.sections.get(0).unwrap().content;
+        match &self.metafile {
+            None => {
+                let mut retstr = String::new();
+                let mut firstsection: Option<String> = Option::None;
 
-                if Regex::new("^#!/.*").unwrap().is_match(&firstline) {
-                    let mut newcontent = String::from(&firstline);
-                    newcontent.push_str(&format!(
-                        "\n{}... all target {}\n",
-                        &self.commentsign,
-                        &(self.targetfile.clone().unwrap())
-                    ));
-                    // reappend original section content
-                    newcontent.push_str(originalcontent.trim_start_matches(&firstline));
-                    firstsection = Option::Some(newcontent);
-                } else {
-                    let mut newcontent = String::from(format!(
-                        "{}... all target {}\n",
-                        self.commentsign,
-                        self.targetfile.clone().unwrap()
-                    ));
-                    newcontent.push_str(originalcontent);
-                    firstsection = Option::Some(newcontent);
+                // respect hashbang
+                // and put comments below it
+                if self.targetfile.is_some() {
+                    if self.sections.get(0).unwrap().is_anonymous() {
+                        let firstline = String::from(
+                            self.sections
+                                .get(0)
+                                .unwrap()
+                                .content
+                                .split("\n")
+                                .nth(0)
+                                .unwrap(),
+                        );
+                        let originalcontent = &self.sections.get(0).unwrap().content;
+
+                        if Regex::new("^#!/.*").unwrap().is_match(&firstline) {
+                            let mut newcontent = String::from(&firstline);
+                            newcontent.push_str(&format!(
+                                "\n{}... all target {}\n",
+                                &self.commentsign,
+                                &(self.targetfile.clone().unwrap())
+                            ));
+                            // reappend original section content
+                            newcontent.push_str(originalcontent.trim_start_matches(&firstline));
+                            firstsection = Option::Some(newcontent);
+                        } else {
+                            let mut newcontent = String::from(format!(
+                                "{}... all target {}\n",
+                                self.commentsign,
+                                self.targetfile.clone().unwrap()
+                            ));
+                            newcontent.push_str(originalcontent);
+                            firstsection = Option::Some(newcontent);
+                        }
+                    } else {
+                        let mut newcontent = String::from(&self.commentsign);
+                        newcontent.push_str("... all target");
+                        newcontent.push_str(&(self.targetfile.clone().unwrap()));
+                        newcontent.push('\n');
+
+                        newcontent.push_str(&self.sections.get(0).unwrap().content);
+                        firstsection = Option::Some(newcontent);
+                    }
                 }
-            } else {
-                let mut newcontent = String::from(&self.commentsign);
-                newcontent.push_str("... all target");
-                newcontent.push_str(&(self.targetfile.clone().unwrap()));
-                newcontent.push('\n');
 
-                newcontent.push_str(&self.sections.get(0).unwrap().content);
-                firstsection = Option::Some(newcontent);
+                for i in &self.sections {
+                    if firstsection.is_some() {
+                        retstr.push_str(&firstsection.unwrap());
+                        firstsection = Option::None;
+                    } else {
+                        retstr.push_str(&i.output(&self.commentsign));
+                    }
+                }
+                return retstr;
+            }
+            Some(metafile) => {
+                return metafile.content.clone();
             }
         }
-
-        for i in &self.sections {
-            if firstsection.is_some() {
-                retstr.push_str(&firstsection.unwrap());
-                firstsection = Option::None;
-            } else {
-                retstr.push_str(&i.output(&self.commentsign));
-            }
-        }
-        return retstr;
     }
 
     fn applysection(&mut self, section: Section) -> bool {
-        //TODO metafile
+        if let Some(_) = &self.metafile {
+            eprintln!(
+                "{}",
+                "cannot apply individual section to file managed by metafile"
+                    .red()
+                    .bold()
+            );
+            return false;
+        }
         for i in 0..self.sections.len() {
             let tmpsection = self.sections.get(i).unwrap();
             if tmpsection.is_anonymous()
@@ -936,9 +1005,9 @@ fn main() -> Result<(), std::io::Error> {
                     let mut outstr: String;
                     outstr = format!("{}-{}: {} | ", i.startline, i.endline, i.name.unwrap());
                     if i.modified {
-                        outstr.push_str(&"modified".red());
+                        outstr.push_str(&format!("{}", "modified".red().bold()));
                     } else {
-                        outstr.push_str(&"ok".green());
+                        outstr.push_str(&format!("{}", "ok".green().bold()));
                     }
                     match i.source {
                         Some(source) => {
