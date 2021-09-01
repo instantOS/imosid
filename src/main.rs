@@ -262,7 +262,7 @@ pub struct Metafile {
     sourcefile: Option<String>,
     modified: bool,
     imosidversion: Version,
-    syntaxversion: u32,
+    syntaxversion: i64,
     value: Value,
     content: String,
     path: PathBuf,
@@ -278,14 +278,15 @@ impl Metafile {
             Err(_) => {
                 return None;
             }
-            Ok(content) => {
-                let value = content.parse::<Value>().unwrap();
+            Ok(mcontent) => {
+                let value = mcontent.parse::<Value>().unwrap();
 
                 let mut retfile = Metafile {
                     targetfile: None,
                     sourcefile: None,
                     hash: String::from(""),
                     parentfile: String::from(""),
+                    // default version strings
                     imosidversion: Version::new(0, 0, 0),
                     syntaxversion: 1,
                     value: value.clone(),
@@ -313,6 +314,16 @@ impl Metafile {
 
                 if let Some(Value::String(sourcefile)) = value.get("source") {
                     retfile.sourcefile = Some(String::from(sourcefile));
+                }
+
+                if let Some(Value::Integer(syntaxversion)) = value.get("syntaxversion") {
+                    retfile.syntaxversion = syntaxversion.clone();
+                }
+
+                if let Some(Value::String(imosidversion)) = value.get("imosidversion") {
+                    if let Ok(version) = Version::parse(imosidversion) {
+                        retfile.imosidversion = version;
+                    }
                 }
 
                 return Some(retfile);
@@ -362,13 +373,17 @@ impl Metafile {
         }
 
         selfmap.insert(String::from("syntaxversion"), Value::Integer(0));
-        //TODO this is a placeholder
+
         selfmap.insert(
             String::from("imosidversion"),
-            Value::String(Version::new(0, 0, 0).to_string()),
+            Value::String(self.imosidversion.to_string()),
+        );
+
+        selfmap.insert(
+            String::from("syntaxversion"),
+            Value::String(self.syntaxversion.to_string()),
         );
         self.value = Value::Table(selfmap);
-
     }
 
     fn output(&mut self) -> String {
@@ -384,7 +399,6 @@ impl Metafile {
             }
             Ok(mut file) => {
                 file.write_all(self.output().as_bytes()).unwrap();
-                println!("output {}", self.output());
             }
         }
     }
