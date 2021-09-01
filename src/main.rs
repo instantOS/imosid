@@ -265,6 +265,7 @@ pub struct Metafile {
     syntaxversion: u32,
     value: Value,
     content: String,
+    path: PathBuf,
 }
 
 impl Metafile {
@@ -272,7 +273,7 @@ impl Metafile {
         if !path.is_file() {
             return None;
         }
-        let metacontent = read_to_string(path);
+        let metacontent = read_to_string(&path);
         match metacontent {
             Err(_) => {
                 return None;
@@ -290,6 +291,7 @@ impl Metafile {
                     value: value.clone(),
                     content: String::from(content),
                     modified: false,
+                    path,
                 };
 
                 // hash and parent are mandatory
@@ -365,11 +367,26 @@ impl Metafile {
             String::from("imosidversion"),
             Value::String(Version::new(0, 0, 0).to_string()),
         );
+        self.value = Value::Table(selfmap);
+
     }
 
     fn output(&mut self) -> String {
         self.update();
         self.value.to_string()
+    }
+
+    fn write_to_file(&mut self) {
+        let newfile = File::create(&self.path);
+        match newfile {
+            Err(_) => {
+                eprintln!("{}", "Error: could not write metafile".red());
+            }
+            Ok(mut file) => {
+                file.write_all(self.output().as_bytes()).unwrap();
+                println!("output {}", self.output());
+            }
+        }
     }
 }
 
@@ -607,33 +624,46 @@ impl Specialfile {
     }
 
     fn compile(&mut self) {
-        if let None = self.metafile {
-            for i in 0..self.sections.len() {
-                self.sections[i].compile();
+        match &mut self.metafile {
+            None => {
+                for i in 0..self.sections.len() {
+                    self.sections[i].compile();
+                }
+            }
+            Some(metafile) => {
+                metafile.compile();
             }
         }
     }
 
-    fn write_to_file(&self) {
-        let newfile = File::create(&expand_tilde(&self.filename));
-        match newfile {
-            Err(_) => {
-                println!("error: could not write to file {}", &self.filename);
-                panic!("write_to_file");
+    fn write_to_file(&mut self) {
+        match &mut self.metafile {
+            None => {
+                let newfile = File::create(&expand_tilde(&self.filename));
+                match newfile {
+                    Err(_) => {
+                        println!("error: could not write to file {}", &self.filename);
+                        panic!("write_to_file");
+                    }
+                    Ok(mut file) => match &self.metafile {
+                        None => {
+                            file.write_all(self.output().as_bytes()).unwrap();
+                        }
+                        Some(metafile) => {
+                            file.write_all(metafile.content.as_bytes()).unwrap();
+                        }
+                    },
+                }
             }
-            Ok(mut file) => match &self.metafile {
-                None => {
-                    file.write_all(self.output().as_bytes()).unwrap();
-                }
-                Some(metafile) => {
-                    file.write_all(metafile.content.as_bytes()).unwrap();
-                }
-            },
+            Some(metafile) => {
+                metafile.write_to_file();
+            }
         }
     }
 
+    // return true if file will be modified
     fn applyfile(&mut self, inputfile: &Specialfile) -> bool {
-        match &self.metafile {
+        match &mut self.metafile {
             None => {
                 //if no sections are updated, don't do anything to the file system
                 let mut modified = false;
@@ -646,15 +676,26 @@ impl Specialfile {
                 return modified;
             }
 
+            // apply entire content if file is managed by metafile
             Some(metafile) => {
-                //TODO
+                match &inputfile.metafile {
+                    None => {
+                        eprintln!(
+                            "{}",
+                            "cannot apply section file to files managed by metafiles"
+                        );
+                    }
+                    Some(applymetafile) => {
+                        metafile.content = applymetafile.content.clone();
+                        return true;
+                    }
+                }
                 return false;
             }
         }
     }
 
     fn output(&self) -> String {
-
         match &self.metafile {
             None => {
                 let mut retstr = String::new();
@@ -990,33 +1031,51 @@ fn main() -> Result<(), std::io::Error> {
             let filename = matches.value_of("file").unwrap();
             if Path::new(filename).is_file() {
                 let infofile = Specialfile::new(filename)?;
-                let commentsign = &infofile.commentsign;
-                println!("comment syntax: {}", commentsign);
+
+                match &infofile.metafile {
+                    None => {
+                        let commentsign = &infofile.commentsign;
+                        println!("comment syntax: {}", commentsign);
+                        for i in infofile.sections {
+                            if !i.name.is_some() {
+                                continue;
+                            }
+                            let mut outstr: String;
+                            outstr =
+                                format!("{}-{}: {} | ", i.startline, i.endline, i.name.unwrap());
+                            if i.modified {
+                                outstr.push_str(&format!("{}", "modified".red().bold()));
+                            } else {
+                                outstr.push_str(&format!("{}", "ok".green().bold()));
+                            }
+                            match i.source {
+                                Some(source) => {
+                                    outstr.push_str(" | source ");
+                                    outstr.push_str(&source);
+                                }
+                                None => {}
+                            }
+                            println!("{}", &outstr);
+                        }
+                    }
+                    Some(metafile) => {
+                        println!("metafile hash: {}", &metafile.hash);
+                        println!(
+                            "{}",
+                            if metafile.modified {
+                                "modified".red()
+                            } else {
+                                "unmodified".green()
+                            }
+                        )
+                    }
+                }
+
                 match infofile.targetfile {
                     Some(target) => {
                         println!("target: {}", &target);
                     }
                     None => {}
-                }
-                for i in infofile.sections {
-                    if !i.name.is_some() {
-                        continue;
-                    }
-                    let mut outstr: String;
-                    outstr = format!("{}-{}: {} | ", i.startline, i.endline, i.name.unwrap());
-                    if i.modified {
-                        outstr.push_str(&format!("{}", "modified".red().bold()));
-                    } else {
-                        outstr.push_str(&format!("{}", "ok".green().bold()));
-                    }
-                    match i.source {
-                        Some(source) => {
-                            outstr.push_str(" | source ");
-                            outstr.push_str(&source);
-                        }
-                        None => {}
-                    }
-                    println!("{}", &outstr);
                 }
             } else {
                 println!("file {} not found", filename);
@@ -1045,7 +1104,7 @@ fn main() -> Result<(), std::io::Error> {
                         let targetpath = String::from(&tmpsource.targetfile.clone().unwrap());
                         println!("applying file {} to {}", &tmpsource.filename, &targetpath);
                         if create_file(&targetpath) {
-                            let targetfile: Specialfile = Specialfile {
+                            let mut targetfile: Specialfile = Specialfile {
                                 specialcomments: tmpsource.specialcomments,
                                 sections: tmpsource.sections,
                                 filename: targetpath.clone(),
@@ -1084,7 +1143,7 @@ fn main() -> Result<(), std::io::Error> {
                 Some(targetname) => {
                     let realtargetname = expand_tilde(targetname);
                     if create_file(targetname) {
-                        let targetfile: Specialfile = Specialfile {
+                        let mut targetfile: Specialfile = Specialfile {
                             specialcomments: sourcefile.specialcomments,
                             sections: sourcefile.sections,
                             file: sourcefile.file,
