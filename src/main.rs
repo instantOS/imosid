@@ -1,4 +1,4 @@
-use clap::{App, AppSettings, Arg, ArgMatches};
+use clap::{crate_version, App, AppSettings, Arg, ArgMatches};
 use colored::Colorize;
 use dirs::home_dir;
 use regex::Regex;
@@ -329,6 +329,53 @@ impl Metafile {
                 return Some(retfile);
             }
         };
+    }
+
+    // create a new metafile for a file
+    fn from(mut path: PathBuf) -> Metafile {
+        //TODO handle result
+        let filecontent = read_to_string(&path).unwrap();
+
+        let parentname = path
+            .file_name()
+            .unwrap()
+            .to_os_string()
+            .into_string()
+            .unwrap();
+
+        //TODO don't create metafiles to metafiles
+
+        let filename = format!("{}.imosid.toml", parentname);
+
+        path.pop();
+        path.push(filename);
+
+        let mut retfile: Metafile;
+        if path.is_file() {
+            retfile = Metafile::new(path.clone(), &filecontent).unwrap();
+            retfile.update();
+            retfile.finalize();
+        } else {
+            retfile = Metafile {
+                targetfile: None,
+                sourcefile: None,
+                hash: String::from("placeholder"),
+                parentfile: String::from(&parentname),
+                imosidversion: Version::parse(crate_version!()).unwrap(),
+                syntaxversion: 0,
+                value: Value::Integer(0),
+                content: String::from(&filecontent),
+                modified: false,
+                path,
+            };
+            println!("created new metafile for {}", &parentname);
+
+            retfile.update();
+            retfile.compile();
+            retfile.write_to_file();
+        }
+
+        retfile
     }
 
     fn get_content_hash(&self) -> String {
@@ -962,13 +1009,13 @@ fn main() -> Result<(), std::io::Error> {
 
     // parse program arguments using clap
     let matches = App::new("imosid")
-        .version("0.1")
+        .version(crate_version!())
         .author("paperbenni <paperbenni@gmail.com>")
         .about("instant manager of sections in dotfiles")
         .arg(Arg::new("syntax").required(false).about("manually set the comment syntax"))
         .subcommand(
             App::new("update")
-                .about("apply source sections to target").arg(&metafilearg)
+                .about("apply source sections to target")
                 .arg(
                     inputarg
                 ).arg(
@@ -1019,7 +1066,7 @@ fn main() -> Result<(), std::io::Error> {
         ).subcommand(
             App::new("apply").about("apply source to target marked in the file").arg(
                 Arg::new("file").index(1).required(true).about("file to apply")
-            ).arg(&metafilearg).arg(Arg::new("recursive")
+            ).arg(Arg::new("recursive")
                   .about("recurively apply all files in the current directly")
                   .takes_value(false)
                   .required(false)
@@ -1031,10 +1078,17 @@ fn main() -> Result<(), std::io::Error> {
     if matches.is_present("compile") {
         if let Some(ref matches) = matches.subcommand_matches("compile") {
             let filename = matches.value_of("file").unwrap();
-            if Path::new(filename).is_file() {
-                let mut testfile = Specialfile::new(filename)?;
-                testfile.compile();
-                testfile.write_to_file();
+            if matches.is_present("metafile") {
+                let mut newmetafile = Metafile::from(PathBuf::from(filename));
+                //TODO reduce multiple hash updates
+                newmetafile.compile();
+                newmetafile.write_to_file();
+            } else {
+                if Path::new(filename).is_file() {
+                    let mut testfile = Specialfile::new(filename)?;
+                    testfile.compile();
+                    testfile.write_to_file();
+                }
             }
         }
     }
