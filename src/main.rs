@@ -1171,7 +1171,6 @@ fn main() -> Result<(), std::io::Error> {
     if matches.is_present("apply") {
         if let Some(ref matches) = matches.subcommand_matches("apply") {
             if matches.is_present("recursive") {
-                //TODO metafile
                 if !Path::new(&expand_tilde(matches.value_of("file").unwrap())).is_dir() {
                     eprintln!("cannot apply file as recursive");
                     return Ok(());
@@ -1252,14 +1251,13 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if matches.is_present("update") {
-        //TODO metafile
         if let Some(ref matches) = matches.subcommand_matches("update") {
             if matches.value_of("target").unwrap() == matches.value_of("input").unwrap() {
                 return Ok(());
             }
 
             //TODO multiple input files
-            //use actual source file
+
             let mut modified = false;
 
             let mut targetfile = get_special_file(matches, "target").unwrap()?;
@@ -1268,38 +1266,56 @@ fn main() -> Result<(), std::io::Error> {
                 let inputfile = get_special_file(matches, "input").unwrap()?;
                 modified = targetfile.applyfile(&inputfile);
             } else {
-                // cache specialfiles to avoid multiple fs calls
-                let mut applymap: HashMap<&String, Specialfile> = HashMap::new();
-                let mut applyvec = Vec::new();
+                match &mut targetfile.metafile {
+                    None => {
+                        // cache specialfiles to avoid multiple fs calls
+                        let mut applymap: HashMap<&String, Specialfile> = HashMap::new();
+                        let mut applyvec = Vec::new();
 
-                for i in &targetfile.sections {
-                    if let Some(source) = &i.source {
-                        if !applymap.contains_key(source) {
-                            match Specialfile::new(source) {
-                                Ok(applyfile) => {
-                                    applymap.insert(source, applyfile);
+                        for i in &targetfile.sections {
+                            if let Some(source) = &i.source {
+                                if !applymap.contains_key(source) {
+                                    match Specialfile::new(source) {
+                                        Ok(applyfile) => {
+                                            applymap.insert(source, applyfile);
+                                        }
+                                        Err(_) => {
+                                            println!("failed to apply section {}", source);
+                                            continue;
+                                        }
+                                    }
                                 }
-                                Err(_) => {
-                                    println!("failed to apply section {}", source);
-                                    continue;
+                                if applymap.contains_key(source) {
+                                    applyvec.push(
+                                        applymap
+                                            .get(source)
+                                            .unwrap()
+                                            .clone()
+                                            .get_section(source)
+                                            .unwrap(),
+                                    );
                                 }
                             }
                         }
-                        if applymap.contains_key(source) {
-                            applyvec.push(
-                                applymap
-                                    .get(source)
-                                    .unwrap()
-                                    .clone()
-                                    .get_section(source)
-                                    .unwrap(),
-                            );
+
+                        for i in applyvec.iter() {
+                            targetfile.applysection(i.clone());
                         }
                     }
-                }
-
-                for i in applyvec.iter() {
-                    targetfile.applysection(i.clone());
+                    Some(metafile) => {
+                        if !metafile.modified {
+                            if let Some(sourcefile) = &metafile.sourcefile {
+                                match Specialfile::new(sourcefile) {
+                                    Ok(file) => {
+                                        targetfile.applyfile(&file);
+                                    }
+                                    Err(_) => {
+                                        println!("failed to apply metafile source {}", sourcefile);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1317,28 +1333,32 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if matches.is_present("query") {
-        //TODO metafile
         if let Some(ref matches) = matches.subcommand_matches("query") {
             let filename = matches.value_of("file").unwrap();
 
             if Path::new(filename).is_file() {
                 let testfile = Specialfile::new(filename)?;
 
-                match matches.values_of("section") {
-                    Some(sections) => {
-                        let sections = sections.into_iter();
-                        for i in sections {
-                            for s in &testfile.sections {
-                                if let Some(name) = &s.name {
-                                    if name == i {
-                                        println!("{}", s.output(&testfile.commentsign));
+                match &testfile.metafile {
+                    None => match matches.values_of("section") {
+                        Some(sections) => {
+                            let sections = sections.into_iter();
+                            for i in sections {
+                                for s in &testfile.sections {
+                                    if let Some(name) = &s.name {
+                                        if name == i {
+                                            println!("{}", s.output(&testfile.commentsign));
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    None => {
-                        println!("{}", testfile.output());
+                        None => {
+                            println!("{}", testfile.output());
+                        }
+                    },
+                    Some(metafile) => {
+                        println!("{}", metafile.content);
                     }
                 }
             } else {
