@@ -684,6 +684,17 @@ impl Specialfile {
         return Ok(retfile);
     }
 
+    fn get_section(&self, name: &str) -> Option<Section> {
+        for i in &self.sections {
+            if let Some(sname) = &i.name {
+                if sname == name {
+                    return Some(i.clone());
+                }
+            }
+        }
+        None
+    }
+
     fn compile(&mut self) {
         match &mut self.metafile {
             None => {
@@ -711,7 +722,11 @@ impl Specialfile {
                             file.write_all(self.output().as_bytes()).unwrap();
                         }
                         Some(metafile) => {
-                            file.write_all(metafile.content.as_bytes()).unwrap();
+                            if !metafile.modified {
+                                file.write_all(metafile.content.as_bytes()).unwrap();
+                            } else {
+                                println!("{} modified, skipping", &self.filename);
+                            }
                         }
                     },
                 }
@@ -739,16 +754,18 @@ impl Specialfile {
 
             // apply entire content if file is managed by metafile
             Some(metafile) => {
-                match &inputfile.metafile {
-                    None => {
-                        eprintln!(
-                            "{}",
-                            "cannot apply section file to files managed by metafiles"
-                        );
-                    }
-                    Some(applymetafile) => {
-                        metafile.content = applymetafile.content.clone();
-                        return true;
+                if !metafile.modified {
+                    match &inputfile.metafile {
+                        None => {
+                            eprintln!(
+                                "{}",
+                                "cannot apply section file to files managed by metafiles"
+                            );
+                        }
+                        Some(applymetafile) => {
+                            metafile.content = applymetafile.content.clone();
+                            return true;
+                        }
                     }
                 }
                 return false;
@@ -1154,7 +1171,9 @@ fn main() -> Result<(), std::io::Error> {
     if matches.is_present("apply") {
         if let Some(ref matches) = matches.subcommand_matches("apply") {
             if matches.is_present("recursive") {
+                //TODO metafile
                 if !Path::new(&expand_tilde(matches.value_of("file").unwrap())).is_dir() {
+                    eprintln!("cannot apply file as recursive");
                     return Ok(());
                 }
                 for i in std::fs::read_dir(&matches.value_of("file").unwrap()).unwrap() {
@@ -1179,7 +1198,7 @@ fn main() -> Result<(), std::io::Error> {
                                 targetfile: Option::Some(targetpath),
                                 commentsign: tmpsource.commentsign,
                                 file: tmpsource.file,
-                                metafile: None,
+                                metafile: tmpsource.metafile,
                             };
                             targetfile.write_to_file();
                         } else {
@@ -1233,19 +1252,54 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if matches.is_present("update") {
+        //TODO metafile
         if let Some(ref matches) = matches.subcommand_matches("update") {
             if matches.value_of("target").unwrap() == matches.value_of("input").unwrap() {
                 return Ok(());
             }
 
-            let mut targetfile = get_special_file(matches, "target").unwrap()?;
-            let inputfile = get_special_file(matches, "input").unwrap()?;
-
+            //TODO multiple input files
+            //use actual source file
             let mut modified = false;
 
-            for i in inputfile.sections {
-                if targetfile.applysection(i) {
-                    modified = true;
+            let mut targetfile = get_special_file(matches, "target").unwrap()?;
+
+            if matches.is_present("input") {
+                let inputfile = get_special_file(matches, "input").unwrap()?;
+                modified = targetfile.applyfile(&inputfile);
+            } else {
+                // cache specialfiles to avoid multiple fs calls
+                let mut applymap: HashMap<&String, Specialfile> = HashMap::new();
+                let mut applyvec = Vec::new();
+
+                for i in &targetfile.sections {
+                    if let Some(source) = &i.source {
+                        if !applymap.contains_key(source) {
+                            match Specialfile::new(source) {
+                                Ok(applyfile) => {
+                                    applymap.insert(source, applyfile);
+                                }
+                                Err(_) => {
+                                    println!("failed to apply section {}", source);
+                                    continue;
+                                }
+                            }
+                        }
+                        if applymap.contains_key(source) {
+                            applyvec.push(
+                                applymap
+                                    .get(source)
+                                    .unwrap()
+                                    .clone()
+                                    .get_section(source)
+                                    .unwrap(),
+                            );
+                        }
+                    }
+                }
+
+                for i in applyvec.iter() {
+                    targetfile.applysection(i.clone());
                 }
             }
 
@@ -1253,8 +1307,7 @@ fn main() -> Result<(), std::io::Error> {
                 println!("{}", targetfile.output());
             } else {
                 if modified {
-                    let mut newfile = File::create(&targetfile.filename)?;
-                    newfile.write_all(targetfile.output().as_bytes())?;
+                    targetfile.write_to_file();
                     println!("updated file");
                 } else {
                     println!("no updates necessary");
@@ -1264,6 +1317,7 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if matches.is_present("query") {
+        //TODO metafile
         if let Some(ref matches) = matches.subcommand_matches("query") {
             let filename = matches.value_of("file").unwrap();
 
