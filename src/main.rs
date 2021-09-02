@@ -875,6 +875,7 @@ impl Specialfile {
 // create file with directory creation and
 // parsing of the home tilde
 // MAYBETODO: support environment variables
+// return false if file already exists
 fn create_file(path: &str) -> bool {
     let realtargetname = expand_tilde(path);
 
@@ -1169,6 +1170,7 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if matches.is_present("apply") {
+        //TODO metafile support
         if let Some(ref matches) = matches.subcommand_matches("apply") {
             if matches.is_present("recursive") {
                 if !Path::new(&expand_tilde(matches.value_of("file").unwrap())).is_dir() {
@@ -1190,6 +1192,7 @@ fn main() -> Result<(), std::io::Error> {
                         let targetpath = String::from(&tmpsource.targetfile.clone().unwrap());
                         println!("applying file {} to {}", &tmpsource.filename, &targetpath);
                         if create_file(&targetpath) {
+                            // create new file
                             let mut targetfile: Specialfile = Specialfile {
                                 specialcomments: tmpsource.specialcomments,
                                 sections: tmpsource.sections,
@@ -1197,6 +1200,8 @@ fn main() -> Result<(), std::io::Error> {
                                 targetfile: Option::Some(targetpath),
                                 commentsign: tmpsource.commentsign,
                                 file: tmpsource.file,
+                                //TODO create own metafile
+                                //TODO set new metafile source
                                 metafile: tmpsource.metafile,
                             };
                             targetfile.write_to_file();
@@ -1236,7 +1241,9 @@ fn main() -> Result<(), std::io::Error> {
                             filename: targetname.clone(),
                             targetfile: Option::Some(targetname.clone()),
                             commentsign: sourcefile.commentsign,
-                            metafile: None,
+                            //TODO create own metafile
+                            //TODO set new metafile source
+                            metafile: sourcefile.metafile,
                         };
                         targetfile.write_to_file();
                     } else {
