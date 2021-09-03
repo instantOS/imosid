@@ -279,7 +279,7 @@ impl Metafile {
                 return None;
             }
             Ok(mcontent) => {
-                let value = mcontent.parse::<Value>().unwrap();
+                let value = mcontent.parse::<Value>().expect("failed to read toml");
 
                 let mut retfile = Metafile {
                     targetfile: None,
@@ -334,7 +334,8 @@ impl Metafile {
     // create a new metafile for a file
     fn from(mut path: PathBuf) -> Metafile {
         //TODO handle result
-        let filecontent = read_to_string(&path).unwrap();
+        let filecontent =
+            read_to_string(&path).expect("could not read file content to create metafile");
 
         let parentname = path
             .file_name()
@@ -352,7 +353,7 @@ impl Metafile {
 
         let mut retfile: Metafile;
         if path.is_file() {
-            retfile = Metafile::new(path.clone(), &filecontent).unwrap();
+            retfile = Metafile::new(path.clone(), &filecontent).expect("could not create metafile");
             retfile.update();
             retfile.finalize();
         } else {
@@ -445,7 +446,8 @@ impl Metafile {
                 eprintln!("{}", "Error: could not write metafile".red());
             }
             Ok(mut file) => {
-                file.write_all(self.output().as_bytes()).unwrap();
+                file.write_all(self.output().as_bytes())
+                    .expect("could not write metafile");
             }
         }
     }
@@ -465,7 +467,7 @@ impl Specialfile {
     fn new(filename: &str) -> Result<Specialfile, std::io::Error> {
         let sourcepath = Path::new(filename)
             .canonicalize()
-            .unwrap()
+            .expect("could not canonicalize path")
             .display()
             .to_string();
 
@@ -737,10 +739,49 @@ impl Specialfile {
         }
     }
 
+    fn create_file(source: Specialfile) {
+        let targetpath = String::from(source.targetfile.clone().unwrap());
+        let realtargetpath = expand_tilde(&targetpath);
+        // create new file
+        match &source.metafile {
+            None => {
+                let mut targetfile: Specialfile = Specialfile {
+                    specialcomments: source.specialcomments,
+                    sections: source.sections,
+                    filename: realtargetpath.clone(),
+                    targetfile: Option::Some(targetpath),
+                    commentsign: source.commentsign,
+                    file: source.file,
+                    metafile: None,
+                };
+                targetfile.write_to_file();
+            }
+            Some(metafile) => {
+                if metafile.modified {
+                    println!("{} modified, skipping", &source.filename);
+                    return ();
+                }
+                OpenOptions::new()
+                    .write(true)
+                    .open(&realtargetpath)
+                    .expect(&format!("cannot open file {}", &targetpath))
+                    .write_all(metafile.content.as_bytes())
+                    .expect(&format!("could not write file {}", &targetpath));
+                let mut newmetafile = Metafile::from(PathBuf::from(&realtargetpath));
+                newmetafile.sourcefile = Some(source.filename);
+                newmetafile.write_to_file();
+            }
+        }
+    }
+
     // return true if file will be modified
     fn applyfile(&mut self, inputfile: &Specialfile) -> bool {
         match &mut self.metafile {
             None => {
+                if inputfile.metafile.is_some() {
+                    eprintln!("cannot apply metafile to normal imosid file");
+                    return false;
+                }
                 //if no sections are updated, don't do anything to the file system
                 let mut modified = false;
 
@@ -763,10 +804,16 @@ impl Specialfile {
                             );
                         }
                         Some(applymetafile) => {
+                            if applymetafile.modified {
+                                println!("source file {} modified", &applymetafile.parentfile);
+                                return false;
+                            }
                             metafile.content = applymetafile.content.clone();
                             return true;
                         }
                     }
+                } else {
+                    println!("{} modified, skipping", &self.filename);
                 }
                 return false;
             }
@@ -1170,7 +1217,6 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if matches.is_present("apply") {
-        //TODO metafile support
         if let Some(ref matches) = matches.subcommand_matches("apply") {
             if matches.is_present("recursive") {
                 if !Path::new(&expand_tilde(matches.value_of("file").unwrap())).is_dir() {
@@ -1193,18 +1239,7 @@ fn main() -> Result<(), std::io::Error> {
                         println!("applying file {} to {}", &tmpsource.filename, &targetpath);
                         if create_file(&targetpath) {
                             // create new file
-                            let mut targetfile: Specialfile = Specialfile {
-                                specialcomments: tmpsource.specialcomments,
-                                sections: tmpsource.sections,
-                                filename: targetpath.clone(),
-                                targetfile: Option::Some(targetpath),
-                                commentsign: tmpsource.commentsign,
-                                file: tmpsource.file,
-                                //TODO create own metafile
-                                //TODO set new metafile source
-                                metafile: tmpsource.metafile,
-                            };
-                            targetfile.write_to_file();
+                            Specialfile::create_file(tmpsource);
                         } else {
                             let mut targetfile = match Specialfile::new(&expand_tilde(&targetpath))
                             {
@@ -1215,6 +1250,9 @@ fn main() -> Result<(), std::io::Error> {
                                 targetfile.write_to_file();
                             }
                         }
+                    } else {
+                        println!("file {} has no specified target", &tmpsource.filename);
+                        return Ok(());
                     }
                 }
                 return Ok(());
@@ -1225,7 +1263,7 @@ fn main() -> Result<(), std::io::Error> {
                 eprintln!("error: cannot open file");
                 return Ok(());
             }
-            let sourcefile = sourcefile.unwrap()?;
+            let sourcefile = sourcefile.expect("could not open source file")?;
             match &sourcefile.targetfile {
                 None => {
                     println!("No target comment found in {}", &sourcefile.filename);
@@ -1234,22 +1272,14 @@ fn main() -> Result<(), std::io::Error> {
                 Some(targetname) => {
                     let realtargetname = expand_tilde(targetname);
                     if create_file(targetname) {
-                        let mut targetfile: Specialfile = Specialfile {
-                            specialcomments: sourcefile.specialcomments,
-                            sections: sourcefile.sections,
-                            file: sourcefile.file,
-                            filename: targetname.clone(),
-                            targetfile: Option::Some(targetname.clone()),
-                            commentsign: sourcefile.commentsign,
-                            //TODO create own metafile
-                            //TODO set new metafile source
-                            metafile: sourcefile.metafile,
-                        };
-                        targetfile.write_to_file();
+                        println!("created new file");
+                        Specialfile::create_file(sourcefile);
                     } else {
                         let mut targetfile = Specialfile::new(&realtargetname)?;
                         if targetfile.applyfile(&sourcefile) {
                             targetfile.write_to_file();
+                        } else {
+                            println!("failed to apply file");
                         }
                     }
                 }
