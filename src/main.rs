@@ -368,7 +368,6 @@ impl Metafile {
                 modified: false,
                 path,
             };
-            println!("created new metafile for {}", &parentname);
 
             retfile.update();
             retfile.compile();
@@ -728,7 +727,7 @@ impl Specialfile {
         }
     }
 
-    fn create_file(source: Specialfile) {
+    fn create_file(source: Specialfile) -> bool {
         let targetpath = String::from(source.targetfile.clone().unwrap());
         let realtargetpath = expand_tilde(&targetpath);
         // create new file
@@ -744,11 +743,15 @@ impl Specialfile {
                     metafile: None,
                 };
                 targetfile.write_to_file();
+                return true;
             }
             Some(metafile) => {
                 if metafile.modified {
-                    println!("{} modified, skipping", &source.filename);
-                    return ();
+                    println!(
+                        "{}",
+                        format!("{} modified, skipping", &source.filename).yellow()
+                    );
+                    return false;
                 }
                 OpenOptions::new()
                     .write(true)
@@ -759,6 +762,7 @@ impl Specialfile {
                 let mut newmetafile = Metafile::from(PathBuf::from(&realtargetpath));
                 newmetafile.sourcefile = Some(source.filename);
                 newmetafile.write_to_file();
+                return true;
             }
         }
     }
@@ -797,12 +801,19 @@ impl Specialfile {
                                 println!("source file {} modified", &applymetafile.parentfile);
                                 return false;
                             }
+                            if metafile.hash == applymetafile.hash {
+                                return false;
+                            }
                             metafile.content = applymetafile.content.clone();
+                            metafile.hash = applymetafile.hash.clone();
                             return true;
                         }
                     }
                 } else {
-                    println!("{} modified, skipping", &self.filename);
+                    println!(
+                        "{}",
+                        format!("target {} modified, skipping", &self.filename.bold()).yellow()
+                    );
                 }
                 return false;
             }
@@ -1120,11 +1131,7 @@ fn main() -> Result<(), std::io::Error> {
         ).subcommand(
             App::new("apply").about("apply source to target marked in the file").arg(
                 Arg::new("file").index(1).required(true).about("file to apply")
-            ).arg(Arg::new("recursive")
-                  .about("recurively apply all files in the current directly")
-                  .takes_value(false)
-                  .required(false)
-                  .short('r'))
+            )
         )
         .setting(AppSettings::ColoredHelp).setting(AppSettings::ArgRequiredElseHelp)
         .get_matches();
@@ -1207,15 +1214,18 @@ fn main() -> Result<(), std::io::Error> {
 
     if matches.is_present("apply") {
         if let Some(ref matches) = matches.subcommand_matches("apply") {
-            if matches.is_present("recursive") {
-                if !Path::new(&expand_tilde(matches.value_of("file").unwrap())).is_dir() {
-                    eprintln!("cannot apply file as recursive");
-                    return Ok(());
-                }
+            let mut donesomething = false;
+            let targetname = expand_tilde(matches.value_of("file").unwrap().clone());
+            let filepath = Path::new(&targetname);
+            if filepath.is_dir() {
                 for i in std::fs::read_dir(&matches.value_of("file").unwrap()).unwrap() {
                     let tmpsourcepath = String::from(&i.unwrap().path().display().to_string());
                     if Path::new(&tmpsourcepath).is_dir() {
                         continue;
+                    } else {
+                        if tmpsourcepath.ends_with(".imosid.toml") {
+                            continue;
+                        }
                     }
                     let tmpsource = match Specialfile::new(&tmpsourcepath) {
                         Ok(file) => file,
@@ -1225,53 +1235,81 @@ fn main() -> Result<(), std::io::Error> {
                         // todo: combine multiple sources applying to one file into one write
 
                         let targetpath = String::from(&tmpsource.targetfile.clone().unwrap());
-                        println!("applying file {} to {}", &tmpsource.filename, &targetpath);
+                        let sourcename = &tmpsource.filename.clone();
                         if create_file(&targetpath) {
                             // create new file
-                            Specialfile::create_file(tmpsource);
+                            if Specialfile::create_file(tmpsource) {
+                                println!(
+                                    "applied {} to create {} ",
+                                    &sourcename.green(),
+                                    &targetpath.bold()
+                                );
+                                donesomething = true;
+                            }
                         } else {
                             let mut targetfile = match Specialfile::new(&expand_tilde(&targetpath))
                             {
                                 Ok(file) => file,
-                                Err(_) => continue,
+                                Err(_) => {
+                                    println!(
+                                        "{}",
+                                        format!("failed to parse {}", &targetpath).red()
+                                    );
+                                    continue;
+                                }
                             };
                             if targetfile.applyfile(&tmpsource) {
                                 targetfile.write_to_file();
+                                println!(
+                                    "applied file {} to {}",
+                                    &sourcename.green(),
+                                    &targetpath.bold()
+                                );
+                                donesomething = true;
                             }
                         }
                     } else {
-                        println!("file {} has no specified target", &tmpsource.filename);
-                        return Ok(());
+                        println!(
+                            "{}",
+                            format!("file {} has no specified target", &tmpsource.filename).red()
+                        );
+                        continue;
                     }
                 }
+                if !donesomething {
+                    println!("{}", "nothing to do".bold());
+                }
                 return Ok(());
-            }
-
-            let sourcefile = get_special_file(&matches, "file");
-            if !sourcefile.is_some() {
-                eprintln!("error: cannot open file");
-                return Ok(());
-            }
-            let sourcefile = sourcefile.expect("could not open source file")?;
-            match &sourcefile.targetfile {
-                None => {
-                    println!("No target comment found in {}", &sourcefile.filename);
+            } else if filepath.is_file() {
+                let sourcefile = get_special_file(&matches, "file");
+                if !sourcefile.is_some() {
+                    eprintln!("error: cannot open file");
                     return Ok(());
                 }
-                Some(targetname) => {
-                    let realtargetname = expand_tilde(targetname);
-                    if create_file(targetname) {
-                        println!("created new file");
-                        Specialfile::create_file(sourcefile);
-                    } else {
-                        let mut targetfile = Specialfile::new(&realtargetname)?;
-                        if targetfile.applyfile(&sourcefile) {
-                            targetfile.write_to_file();
+                let sourcefile = sourcefile.expect("could not open source file")?;
+                match &sourcefile.targetfile {
+                    None => {
+                        println!("No target comment found in {}", &sourcefile.filename);
+                        return Ok(());
+                    }
+                    Some(targetname) => {
+                        let realtargetname = expand_tilde(targetname);
+                        if create_file(targetname) {
+                            println!("created new file");
+                            Specialfile::create_file(sourcefile);
                         } else {
-                            println!("failed to apply file");
+                            let mut targetfile = Specialfile::new(&realtargetname)?;
+                            if targetfile.applyfile(&sourcefile) {
+                                targetfile.write_to_file();
+                            } else {
+                                println!("failed to apply file");
+                            }
                         }
                     }
                 }
+            } else {
+                eprintln!("{}", "error: cannot open file".red().bold());
+                return Ok(());
             }
         }
     }
