@@ -35,7 +35,6 @@ pub struct ContentLine {
     content: String,
 }
 
-// parse
 impl Specialcomment {
     fn new(line: &str, commentsymbol: &str, linenumber: u32) -> Option<Specialcomment> {
         if !line.starts_with(commentsymbol) {
@@ -711,31 +710,21 @@ impl Specialfile {
     }
 
     fn write_to_file(&mut self) {
-        match &mut self.metafile {
-            None => {
-                let newfile = File::create(&expand_tilde(&self.filename));
-                match newfile {
-                    Err(_) => {
-                        println!("error: could not write to file {}", &self.filename);
-                        panic!("write_to_file");
-                    }
-                    Ok(mut file) => match &self.metafile {
-                        None => {
-                            file.write_all(self.output().as_bytes()).unwrap();
-                        }
-                        Some(metafile) => {
-                            if !metafile.modified {
-                                file.write_all(metafile.content.as_bytes()).unwrap();
-                            } else {
-                                println!("{} modified, skipping", &self.filename);
-                            }
-                        }
-                    },
+        let newfile = File::create(&expand_tilde(&self.filename));
+        match newfile {
+            Err(_) => {
+                println!("error: could not write to file {}", &self.filename);
+                panic!("write_to_file");
+            }
+            Ok(mut file) => match &mut self.metafile {
+                None => {
+                    file.write_all(self.output().as_bytes()).unwrap();
                 }
-            }
-            Some(metafile) => {
-                metafile.write_to_file();
-            }
+                Some(metafile) => {
+                    file.write_all(metafile.content.as_bytes()).unwrap();
+                    metafile.write_to_file();
+                }
+            },
         }
     }
 
@@ -1289,10 +1278,6 @@ fn main() -> Result<(), std::io::Error> {
 
     if matches.is_present("update") {
         if let Some(ref matches) = matches.subcommand_matches("update") {
-            if matches.value_of("target").unwrap() == matches.value_of("input").unwrap() {
-                return Ok(());
-            }
-
             //TODO multiple input files
 
             let mut modified = false;
@@ -1305,6 +1290,10 @@ fn main() -> Result<(), std::io::Error> {
             } else {
                 match &mut targetfile.metafile {
                     None => {
+                        if matches.value_of("target").unwrap() == matches.value_of("input").unwrap()
+                        {
+                            return Ok(());
+                        }
                         // cache specialfiles to avoid multiple fs calls
                         let mut applymap: HashMap<&String, Specialfile> = HashMap::new();
                         let mut applyvec = Vec::new();
@@ -1344,7 +1333,7 @@ fn main() -> Result<(), std::io::Error> {
                             if let Some(sourcefile) = &metafile.sourcefile {
                                 match Specialfile::new(sourcefile) {
                                     Ok(file) => {
-                                        targetfile.applyfile(&file);
+                                        modified = targetfile.applyfile(&file);
                                     }
                                     Err(_) => {
                                         println!("failed to apply metafile source {}", sourcefile);
