@@ -177,8 +177,18 @@ impl Section {
     }
 
     // set target hash to current hash
-    fn compile(&mut self) {
+    // return false if nothing has changed
+    fn compile(&mut self) -> bool {
+        match &self.targethash {
+            Some(hash) => {
+                if hash == &self.hash {
+                    return false;
+                }
+            }
+            None => {}
+        }
         self.targethash = Option::Some(self.hash.clone());
+        false
     }
 
     // anonymous sections are sections without marker comments
@@ -389,9 +399,15 @@ impl Metafile {
         self.modified = self.hash != self.get_content_hash();
     }
 
-    fn compile(&mut self) {
-        self.hash = self.get_content_hash();
+    fn compile(&mut self) -> bool {
+        let contenthash = self.get_content_hash();
         self.modified = false;
+        if self.hash == contenthash {
+            false
+        } else {
+            self.hash = contenthash;
+            true
+        }
     }
 
     // populate toml value with data
@@ -695,17 +711,19 @@ impl Specialfile {
         None
     }
 
-    fn compile(&mut self) {
+    fn compile(&mut self) -> bool {
+        let mut didsomething = false;
         match &mut self.metafile {
             None => {
                 for i in 0..self.sections.len() {
-                    self.sections[i].compile();
+                    didsomething = didsomething || self.sections[i].compile();
                 }
             }
             Some(metafile) => {
-                metafile.compile();
+                didsomething = metafile.compile();
             }
         }
+        didsomething
     }
 
     fn write_to_file(&mut self) {
@@ -1147,8 +1165,14 @@ fn main() -> Result<(), std::io::Error> {
             } else {
                 if Path::new(filename).is_file() {
                     let mut testfile = Specialfile::new(filename)?;
-                    testfile.compile();
-                    testfile.write_to_file();
+                    if testfile.compile() {
+                        testfile.write_to_file();
+                        println!("compiled {}", &filename.bold());
+                    } else {
+                        println!("{} already compiled", &filename.green());
+                    }
+                } else {
+                    eprintln!("{}", "file does not exist".red().bold());
                 }
             }
         }
