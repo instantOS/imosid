@@ -729,7 +729,7 @@ impl Specialfile {
         match &mut self.metafile {
             None => {
                 for i in 0..self.sections.len() {
-                    didsomething = didsomething || self.sections[i].compile();
+                    didsomething = self.sections[i].compile() || didsomething;
                 }
             }
             Some(metafile) => {
@@ -1405,6 +1405,21 @@ fn main() -> Result<(), std::io::Error> {
                 if tmpsource.modified {
                     println!("{} modified", tmpsource.filename.red());
                     anymodified = true;
+                }
+                let mut fileanonymous = true;
+                if !tmpsource.metafile.is_some() {
+                    for i in &tmpsource.sections {
+                        if !i.is_anonymous() {
+                            fileanonymous = false;
+                        }
+                    }
+                    if fileanonymous {
+                        println!(
+                            "{} {}",
+                            tmpsource.filename.yellow().bold(),
+                            "is unmanaged".yellow()
+                        );
+                    }
                 }
             }
             if !anymodified {
