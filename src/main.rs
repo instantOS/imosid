@@ -799,12 +799,35 @@ impl Specialfile {
         }
     }
 
+    fn is_anonymous(&self) -> bool {
+        let mut anonymous = true;
+
+        for i in &self.sections {
+            if !i.is_anonymous() {
+                anonymous = false;
+                break;
+            }
+        }
+        anonymous
+    }
+
     // return true if file will be modified
     fn applyfile(&mut self, inputfile: &Specialfile) -> bool {
+        if self.is_anonymous() {
+            eprintln!(
+                "{} {}",
+                "cannot apply file to unmanaged file ".red(),
+                self.filename.red().bold()
+            );
+            return false;
+        }
         match &mut self.metafile {
             None => {
                 if inputfile.metafile.is_some() {
-                    eprintln!("cannot apply metafile to normal imosid file");
+                    eprintln!(
+                        "cannot apply metafile to normal imosid file {}",
+                        self.filename.bold()
+                    );
                     return false;
                 }
                 //if no sections are updated, don't do anything to the file system
