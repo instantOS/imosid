@@ -796,9 +796,23 @@ impl Specialfile {
                 //if no sections are updated, don't do anything to the file system
                 let mut modified = false;
 
-                for i in &inputfile.sections {
-                    if self.applysection(i.clone()) {
-                        modified = true;
+                let mut filemodified = false;
+                for i in &self.sections {
+                    if i.modified {
+                        filemodified = true;
+                        break;
+                    }
+                }
+
+                if !filemodified {
+                    // copy entire file contents if all sections are unmodified
+                    self.sections = inputfile.sections.clone();
+                    self.specialcomments = inputfile.specialcomments.clone();
+                } else {
+                    for i in &inputfile.sections {
+                        if self.applysection(i.clone()) {
+                            modified = true;
+                        }
                     }
                 }
                 return modified;
