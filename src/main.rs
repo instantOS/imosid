@@ -181,14 +181,20 @@ impl Section {
     fn compile(&mut self) -> bool {
         match &self.targethash {
             Some(hash) => {
-                if hash == &self.hash {
+                if hash.to_string() == self.hash {
                     return false;
                 }
             }
-            None => {}
+            None => {
+                if self.is_anonymous() {
+                    return false;
+                } else {
+                    return true;
+                }
+            }
         }
         self.targethash = Option::Some(self.hash.clone());
-        false
+        true
     }
 
     // anonymous sections are sections without marker comments
@@ -475,6 +481,7 @@ pub struct Specialfile {
     targetfile: Option<String>,
     metafile: Option<Metafile>,
     commentsign: String,
+    modified: bool,
 }
 
 impl Specialfile {
@@ -520,6 +527,7 @@ impl Specialfile {
                 file: sourcefile,
                 filename: sourcepath,
                 targetfile: metafile.targetfile.clone(),
+                modified: metafile.modified,
                 metafile: Some(metafile),
                 commentsign: String::from(""),
             });
@@ -635,6 +643,7 @@ impl Specialfile {
                 sectionvector.remove(i);
             }
 
+            let mut modified = false;
             // introduce anonymous sections
             if sectionvector.len() > 0 {
                 let mut currentline = 1;
@@ -683,21 +692,25 @@ impl Specialfile {
                 }
                 if !i.is_anonymous() {
                     i.finalize();
+                    if i.modified {
+                        modified = true;
+                    }
                 }
             }
+
+            let retfile = Specialfile {
+                specialcomments: commentvector,
+                sections: sectionvector,
+                file: sourcefile,
+                filename: sourcepath,
+                targetfile,
+                commentsign,
+                metafile: None,
+                modified,
+            };
+
+            return Ok(retfile);
         }
-
-        let retfile = Specialfile {
-            specialcomments: commentvector,
-            sections: sectionvector,
-            file: sourcefile,
-            filename: sourcepath,
-            targetfile,
-            commentsign,
-            metafile: None,
-        };
-
-        return Ok(retfile);
     }
 
     fn get_section(&self, name: &str) -> Option<Section> {
@@ -759,6 +772,7 @@ impl Specialfile {
                     commentsign: source.commentsign,
                     file: source.file,
                     metafile: None,
+                    modified: source.modified,
                 };
                 targetfile.write_to_file();
                 return true;
@@ -796,15 +810,7 @@ impl Specialfile {
                 //if no sections are updated, don't do anything to the file system
                 let mut modified = false;
 
-                let mut filemodified = false;
-                for i in &self.sections {
-                    if i.modified {
-                        filemodified = true;
-                        break;
-                    }
-                }
-
-                if !filemodified {
+                if !self.modified {
                     // copy entire file contents if all sections are unmodified
                     self.sections = inputfile.sections.clone();
                     self.specialcomments = inputfile.specialcomments.clone();
@@ -1143,6 +1149,16 @@ fn main() -> Result<(), std::io::Error> {
                         .about("file to process")
                 )
         ).subcommand(
+            App::new("check")
+                .about("check folder for modified files")
+                .setting(AppSettings::ColoredHelp)
+                .arg(
+                    Arg::new("directory")
+                        .index(1)
+                        .required(true)
+                        .about("directory to check")
+                )
+        ).subcommand(
             App::new("query")
                 .about("print section from file")
                 .arg(
@@ -1257,11 +1273,14 @@ fn main() -> Result<(), std::io::Error> {
             let filepath = Path::new(&targetname);
             if filepath.is_dir() {
                 for i in std::fs::read_dir(&matches.value_of("file").unwrap()).unwrap() {
+                    //TODO do the same as with check
                     let tmpsourcepath = String::from(&i.unwrap().path().display().to_string());
                     if Path::new(&tmpsourcepath).is_dir() {
                         continue;
                     } else {
-                        if tmpsourcepath.ends_with(".imosid.toml") {
+                        if tmpsourcepath.ends_with(".imosid.toml")
+                            || tmpsourcepath.contains("/.git/")
+                        {
                             continue;
                         }
                     }
@@ -1348,6 +1367,48 @@ fn main() -> Result<(), std::io::Error> {
             } else {
                 eprintln!("{}", "error: cannot open file".red().bold());
                 return Ok(());
+            }
+        }
+    }
+
+    if matches.is_present("check") {
+        if let Some(ref matches) = matches.subcommand_matches("check") {
+            let targetname = expand_tilde(matches.value_of("directory").unwrap().clone());
+            let filepath = Path::new(&targetname);
+            if !filepath.is_dir() {
+                eprintln!("{}", "only directories can be checked".red());
+                return Ok(());
+            }
+
+            let mut anymodified = false;
+
+            for i in std::fs::read_dir(&matches.value_of("directory").unwrap()).unwrap() {
+                let direntry;
+                match i {
+                    Err(_) => {
+                        continue;
+                    }
+                    Ok(dir) => {
+                        direntry = dir;
+                    }
+                }
+                let tmpsourcepath = String::from(&direntry.path().display().to_string());
+
+                if tmpsourcepath.ends_with(".imosid.toml") || tmpsourcepath.contains("/.git/") {
+                    continue;
+                }
+
+                let tmpsource = match Specialfile::new(&tmpsourcepath) {
+                    Ok(file) => file,
+                    Err(_) => continue,
+                };
+                if tmpsource.modified {
+                    println!("{} modified", tmpsource.filename.red());
+                    anymodified = true;
+                }
+            }
+            if !anymodified {
+                println!("{}", "no modified files".green());
             }
         }
     }
