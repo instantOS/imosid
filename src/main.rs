@@ -11,6 +11,7 @@ use std::io::{self, prelude::*, BufRead, ErrorKind};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use toml::Value;
+use walkdir::WalkDir;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum CommentType {
@@ -872,7 +873,11 @@ impl Specialfile {
                     // copy entire file contents if all sections are unmodified
                     self.sections = inputfile.sections.clone();
                     self.specialcomments = inputfile.specialcomments.clone();
-                    println!("applied all sections to {}", self.filename.bold());
+                    println!(
+                        "applied all sections from {} to {}",
+                        inputfile.filename.bold(),
+                        self.filename.bold()
+                    );
                     modified = true;
                 } else {
                     for i in &inputfile.sections {
@@ -880,6 +885,11 @@ impl Specialfile {
                             modified = true;
                         }
                     }
+                    println!(
+                        "applied {} to {}",
+                        inputfile.filename.bold(),
+                        self.filename.bold()
+                    );
                 }
                 return modified;
             }
@@ -905,6 +915,12 @@ impl Specialfile {
                             }
                             metafile.content = applymetafile.content.clone();
                             metafile.hash = applymetafile.hash.clone();
+
+                            println!(
+                                "applied {} to {}",
+                                inputfile.filename.bold(),
+                                self.filename.bold()
+                            );
                             return true;
                         }
                     }
@@ -1333,17 +1349,17 @@ fn main() -> Result<(), std::io::Error> {
             let targetname = expand_tilde(matches.value_of("file").unwrap().clone());
             let filepath = Path::new(&targetname);
             if filepath.is_dir() {
-                for i in std::fs::read_dir(&matches.value_of("file").unwrap()).unwrap() {
+                for entry in WalkDir::new(&matches.value_of("file").unwrap())
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                {
                     //TODO do the same as with check
-                    let tmpsourcepath = String::from(&i.unwrap().path().display().to_string());
-                    if Path::new(&tmpsourcepath).is_dir() {
+                    let tmpsourcepath = String::from(&entry.path().display().to_string());
+                    if Path::new(&tmpsourcepath).is_dir()
+                        || tmpsourcepath.ends_with(".imosid.toml")
+                        || tmpsourcepath.contains("/.git/")
+                    {
                         continue;
-                    } else {
-                        if tmpsourcepath.ends_with(".imosid.toml")
-                            || tmpsourcepath.contains("/.git/")
-                        {
-                            continue;
-                        }
                     }
                     let tmpsource = match Specialfile::new(&tmpsourcepath) {
                         Ok(file) => file,
@@ -1378,18 +1394,13 @@ fn main() -> Result<(), std::io::Error> {
                             };
                             if targetfile.applyfile(&tmpsource) {
                                 targetfile.write_to_file();
-                                println!(
-                                    "applied file {} to {}",
-                                    &sourcename.green(),
-                                    &targetpath.bold()
-                                );
                                 donesomething = true;
                             }
                         }
                     } else {
                         println!(
                             "{}",
-                            format!("file {} has no specified target", &tmpsource.filename).red()
+                            format!("file {} has no target", &tmpsource.filename.bold()).red()
                         );
                         continue;
                     }
@@ -1441,16 +1452,10 @@ fn main() -> Result<(), std::io::Error> {
 
             let mut anymodified = false;
 
-            for i in std::fs::read_dir(&matches.value_of("directory").unwrap()).unwrap() {
-                let direntry;
-                match i {
-                    Err(_) => {
-                        continue;
-                    }
-                    Ok(dir) => {
-                        direntry = dir;
-                    }
-                }
+            for direntry in WalkDir::new(&matches.value_of("directory").unwrap())
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 let tmpsourcepath = String::from(&direntry.path().display().to_string());
 
                 if tmpsourcepath.ends_with(".imosid.toml") || tmpsourcepath.contains("/.git/") {
@@ -1462,7 +1467,7 @@ fn main() -> Result<(), std::io::Error> {
                     Err(_) => continue,
                 };
                 if tmpsource.modified {
-                    println!("{} modified", tmpsource.filename.red());
+                    println!("{} {}", tmpsource.filename.red().bold(), "modified".red());
                     anymodified = true;
                 }
                 let mut fileanonymous = true;
