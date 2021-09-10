@@ -821,6 +821,15 @@ impl Specialfile {
             );
             return false;
         }
+        if inputfile.is_anonymous() {
+            eprintln!(
+                "{} {}",
+                inputfile.filename.red(),
+                "is unmanaged, cannot apply"
+            );
+            return false;
+        }
+
         match &mut self.metafile {
             None => {
                 if inputfile.metafile.is_some() {
@@ -833,10 +842,38 @@ impl Specialfile {
                 //if no sections are updated, don't do anything to the file system
                 let mut modified = false;
 
-                if !self.modified {
+                let mut allsections = true;
+
+                for i in &self.sections {
+                    let selfname = match &i.name {
+                        Some(name) => name.clone(),
+                        None => {
+                            continue;
+                        }
+                    };
+                    allsections = false;
+                    for u in &inputfile.sections {
+                        if let Some(inputname) = u.name.clone() {
+                            if inputname == selfname {
+                                allsections = true;
+                                break;
+                            }
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    if !allsections {
+                        break;
+                    }
+                }
+
+                if !self.modified && allsections {
                     // copy entire file contents if all sections are unmodified
                     self.sections = inputfile.sections.clone();
                     self.specialcomments = inputfile.specialcomments.clone();
+                    println!("applied all sections to {}", self.filename.bold());
+                    modified = true;
                 } else {
                     for i in &inputfile.sections {
                         if self.applysection(i.clone()) {
@@ -863,6 +900,7 @@ impl Specialfile {
                                 return false;
                             }
                             if metafile.hash == applymetafile.hash {
+                                println!("file {} already up to date", self.filename.bold());
                                 return false;
                             }
                             metafile.content = applymetafile.content.clone();
@@ -1375,14 +1413,12 @@ fn main() -> Result<(), std::io::Error> {
                     Some(targetname) => {
                         let realtargetname = expand_tilde(targetname);
                         if create_file(targetname) {
-                            println!("created new file");
+                            println!("created new file {}", targetname.bold());
                             Specialfile::create_file(sourcefile);
                         } else {
                             let mut targetfile = Specialfile::new(&realtargetname)?;
                             if targetfile.applyfile(&sourcefile) {
                                 targetfile.write_to_file();
-                            } else {
-                                println!("failed to apply file");
                             }
                         }
                     }
