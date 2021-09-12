@@ -6,9 +6,10 @@ use semver::Version;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fs::{read_to_string, File, OpenOptions};
+use std::fs::{self, read_to_string, File, OpenOptions};
 use std::io::{self, prelude::*, BufRead, ErrorKind};
 use std::ops::Deref;
+use std::os::unix::prelude::PermissionsExt;
 use std::path::{Path, PathBuf};
 use toml::Value;
 use walkdir::WalkDir;
@@ -20,6 +21,7 @@ enum CommentType {
     SourceInfo,
     TargetInfo,
     HashInfo,
+    PermissionInfo,
 }
 
 #[derive(Clone)]
@@ -98,6 +100,24 @@ impl Specialcomment {
                                 println!("missing source file on line {}", linenumber);
                                 return Option::None;
                             }
+                        }
+                    }
+                    "permissions" => {
+                        if sectionname != "all" {
+                            return Option::None;
+                        }
+                        match &cargument {
+                            None => {
+                                return Option::None;
+                            }
+                            Some(arg) => match arg.parse::<u32>() {
+                                Err(_) => {
+                                    return Option::None;
+                                }
+                                Ok(_) => {
+                                    tmptype = CommentType::PermissionInfo;
+                                }
+                            },
                         }
                     }
                     "target" => {
@@ -282,6 +302,7 @@ pub struct Metafile {
     value: Value,
     content: String,
     path: PathBuf,
+    permissions: Option<u32>,
 }
 
 impl Metafile {
@@ -308,6 +329,7 @@ impl Metafile {
                     value: value.clone(),
                     content: String::from(content),
                     modified: false,
+                    permissions: Option::None,
                     path,
                 };
 
@@ -332,6 +354,11 @@ impl Metafile {
                     retfile.sourcefile = Some(String::from(sourcefile));
                 }
 
+                if let Some(Value::Integer(permissions)) = value.get("permissions") {
+                    //TODO check if permissions smaller than 777
+                    retfile.permissions = Some(*permissions as u32);
+                }
+
                 if let Some(Value::Integer(syntaxversion)) = value.get("syntaxversion") {
                     retfile.syntaxversion = syntaxversion.clone();
                 }
@@ -345,6 +372,20 @@ impl Metafile {
                 return Some(retfile);
             }
         };
+    }
+
+    fn write_permissions(&self) {
+        let mut parentpath = self.path.clone();
+        parentpath.pop();
+        parentpath.push(&self.parentfile);
+        if let Some(permissions) = &self.permissions {
+            let mut perms = fs::metadata(&parentpath).unwrap().permissions();
+            let permint = u32::from_str_radix(&format!("{}", permissions + 1000000), 8).unwrap();
+            perms.set_mode(permint);
+            fs::set_permissions(&parentpath, perms).expect("failed to set permissions");
+        } else {
+            println!("no permissions");
+        }
     }
 
     // create a new metafile for a file
@@ -376,13 +417,14 @@ impl Metafile {
             retfile = Metafile {
                 targetfile: None,
                 sourcefile: None,
-                hash: String::from("placeholder"),
+                hash: String::from(""),
                 parentfile: String::from(&parentname),
                 imosidversion: Version::parse(crate_version!()).unwrap(),
                 syntaxversion: 0,
                 value: Value::Integer(0),
                 content: String::from(&filecontent),
                 modified: false,
+                permissions: Option::None,
                 path,
             };
 
@@ -483,6 +525,7 @@ pub struct Specialfile {
     metafile: Option<Metafile>,
     commentsign: String,
     modified: bool,
+    permissions: Option<u32>,
 }
 
 impl Specialfile {
@@ -505,6 +548,7 @@ impl Specialfile {
         let mut sectionmap: HashMap<String, Vec<Specialcomment>> = HashMap::new();
 
         let mut targetfile: Option<String> = Option::None;
+        let mut permissions = Option::None;
         let mut commentsign = String::new();
         let mut hascommentsign = false;
 
@@ -529,6 +573,7 @@ impl Specialfile {
                 filename: sourcepath,
                 targetfile: metafile.targetfile.clone(),
                 modified: metafile.modified,
+                permissions: metafile.permissions.clone(),
                 metafile: Some(metafile),
                 commentsign: String::from(""),
             });
@@ -553,6 +598,14 @@ impl Specialfile {
                                     if comment.argument.is_some() {
                                         targetfile =
                                             Option::Some(String::from(&comment.argument.unwrap()));
+                                    }
+                                }
+                                CommentType::PermissionInfo => {
+                                    if let Some(arg) = comment.argument {
+                                        permissions = match arg.split_at(3).1.parse::<u32>() {
+                                            Err(_) => Option::None,
+                                            Ok(permnumber) => Option::Some(permnumber),
+                                        }
                                     }
                                 }
                                 &_ => {}
@@ -708,6 +761,7 @@ impl Specialfile {
                 commentsign,
                 metafile: None,
                 modified,
+                permissions,
             };
 
             return Ok(retfile);
@@ -741,7 +795,8 @@ impl Specialfile {
     }
 
     fn write_to_file(&mut self) {
-        let newfile = File::create(&expand_tilde(&self.filename));
+        let targetname = &expand_tilde(&self.filename);
+        let newfile = File::create(targetname);
         match newfile {
             Err(_) => {
                 println!("error: could not write to file {}", &self.filename);
@@ -756,6 +811,14 @@ impl Specialfile {
                     metafile.write_to_file();
                 }
             },
+        }
+
+        if let Some(permissions) = self.permissions {
+            let mut perms = fs::metadata(targetname).unwrap().permissions();
+            let permint = u32::from_str_radix(&format!("{}", permissions + 1000000), 8).unwrap();
+            perms.set_mode(permint);
+            println!("setting permissions");
+            fs::set_permissions(targetname, perms).expect("failed to set permissions");
         }
     }
 
@@ -774,6 +837,7 @@ impl Specialfile {
                     file: source.file,
                     metafile: None,
                     modified: source.modified,
+                    permissions: source.permissions,
                 };
                 targetfile.write_to_file();
                 return true;
@@ -794,7 +858,9 @@ impl Specialfile {
                     .expect(&format!("could not write file {}", &targetpath));
                 let mut newmetafile = Metafile::from(PathBuf::from(&realtargetpath));
                 newmetafile.sourcefile = Some(source.filename);
+                newmetafile.permissions = metafile.permissions;
                 newmetafile.write_to_file();
+                newmetafile.write_permissions();
                 return true;
             }
         }
@@ -814,29 +880,29 @@ impl Specialfile {
 
     // return true if file will be modified
     fn applyfile(&mut self, inputfile: &Specialfile) -> bool {
-        if self.is_anonymous() {
-            eprintln!(
-                "{} {}",
-                "cannot apply file to unmanaged file ".red(),
-                self.filename.red().bold()
-            );
-            return false;
-        }
-        if inputfile.is_anonymous() {
-            eprintln!(
-                "{} {}",
-                inputfile.filename.red(),
-                "is unmanaged, cannot apply"
-            );
-            return false;
-        }
-
         match &mut self.metafile {
             None => {
+                if self.is_anonymous() {
+                    eprintln!(
+                        "{} {}",
+                        "cannot apply to unmanaged file ".yellow(),
+                        self.filename.yellow().bold()
+                    );
+                    return false;
+                }
                 if inputfile.metafile.is_some() {
                     eprintln!(
                         "cannot apply metafile to normal imosid file {}",
                         self.filename.bold()
+                    );
+                    return false;
+                }
+
+                if inputfile.is_anonymous() {
+                    eprintln!(
+                        "{} {}",
+                        inputfile.filename.red(),
+                        "is unmanaged, cannot apply"
                     );
                     return false;
                 }
@@ -1296,6 +1362,7 @@ fn main() -> Result<(), std::io::Error> {
                     None => {
                         let commentsign = &infofile.commentsign;
                         println!("comment syntax: {}", commentsign);
+
                         for i in infofile.sections {
                             if !i.name.is_some() {
                                 continue;
@@ -1331,11 +1398,12 @@ fn main() -> Result<(), std::io::Error> {
                     }
                 }
 
-                match infofile.targetfile {
-                    Some(target) => {
-                        println!("target: {}", &target);
-                    }
-                    None => {}
+                if let Some(permissions) = infofile.permissions {
+                    println!("target file permissions: {}", &permissions);
+                }
+
+                if let Some(target) = infofile.targetfile {
+                    println!("target: {}", &target);
                 }
             } else {
                 println!("file {} not found", filename);
