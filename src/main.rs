@@ -26,6 +26,7 @@ enum CommentType {
     PermissionInfo,
 }
 
+/// A comment that gets interpreted by imosid
 #[derive(Clone)]
 pub struct Specialcomment {
     line: u32,
@@ -35,6 +36,7 @@ pub struct Specialcomment {
     argument: Option<String>,
 }
 
+/// A line in a file with its line number and content stored
 pub struct ContentLine {
     linenumber: u32,
     content: String,
@@ -45,13 +47,15 @@ impl Specialcomment {
         if !line.starts_with(commentsymbol) {
             return Option::None;
         }
+
+        // construct regex that matches valid comments
         let mut iscomment = String::from("^ *");
         iscomment.push_str(&commentsymbol);
         iscomment.push_str(" *\\.\\.\\. *(.*)");
-
         let commentregex = Regex::new(&iscomment).unwrap();
 
         let keywords = commentregex.captures(&line);
+
         match &keywords {
             Some(captures) => {
                 let keywords = captures
@@ -162,6 +166,9 @@ impl Specialcomment {
     }
 }
 
+/// A section of a file marked by beginning/end comments
+/// Or alternatively no comments for an anonymous section
+/// these can be independently updated or broken
 #[derive(Clone)]
 pub struct Section {
     startline: u32,
@@ -174,8 +181,6 @@ pub struct Section {
     modified: bool,
 }
 
-// sections that files get divided into
-// these can be independently updated or broken
 impl Section {
     fn new(
         start: u32,
@@ -199,8 +204,9 @@ impl Section {
         }
     }
 
-    // set target hash to current hash
-    // return false if nothing has changed
+    /// set target hash to current hash
+    /// marking the section as unmodified
+    /// return false if nothing has changed
     fn compile(&mut self) -> bool {
         match &self.targethash {
             Some(hash) => {
@@ -220,8 +226,8 @@ impl Section {
         true
     }
 
-    // anonymous sections are sections without marker comments
-    // e.g. parts not tracked by imosid
+    /// anonymous sections are sections without marker comments
+    /// e.g. parts not tracked by imosid
     fn is_anonymous(&self) -> bool {
         match &self.name {
             Some(_) => false,
@@ -229,8 +235,8 @@ impl Section {
         }
     }
 
-    // generate section hash
-    // and detect section status
+    /// generate section hash
+    /// and detect section status
     fn finalize(&mut self) {
         let mut hasher = Sha256::new();
         hasher.update(&self.content);
@@ -538,7 +544,21 @@ impl Specialfile {
             .display()
             .to_string();
 
-        let sourcefile = OpenOptions::new().read(true).write(true).open(filename)?;
+        let sourcefile = match OpenOptions::new().read(true).write(true).open(filename) {
+            Err(e) => {
+                if e.kind() == ErrorKind::PermissionDenied {
+                    // open file as readonly if writing is not permitted
+                    match OpenOptions::new().read(true).write(false).open(filename) {
+                        Ok(file) => file,
+                        Err(error) => return Err(error),
+                    }
+                } else {
+                    return Err(e);
+                }
+            }
+            Ok(file) => file,
+        };
+
         let metafile;
 
         let mut commentvector = Vec::new();
