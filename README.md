@@ -25,6 +25,9 @@ cargo build --release
 ```
 ## General information
 
+imosid aims to be an unobtrusive dotfile manager used by linux distributions or
+automated config systems that does not interfere with user customisation.
+
 Imosid works by dividing dotfiles into sections using special comments. These
 sections can be updated, deleted or modified independently of one another. A section
 can have two states, unmodified and modified. Modified sections are ignored by
@@ -157,6 +160,6 @@ Content
 
 ## Disclaimer
 
-This is my first time using rust, the program is in an extremely basic state.
-Syntax and options are still subject to change
+**This is my first time using rust, the program is in an extremely basic state.
+Syntax and options are still subject to change**
 
