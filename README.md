@@ -6,17 +6,17 @@ instant manager of sections in dotfiles
 
 Planned features
 
-- autodetect comment syntax for files
-- compare hashes of sections with upstream files
-- syntax to combine multiple imosid comments into one line
-- Other section sources
-    - http
-    - git
-    - ipfs
-    - ipns
-- colored/styled output
+- [X] autodetect comment syntax for files
+- [ ] compare hashes of sections with upstream files
+- [ ] syntax to combine multiple imosid comments into one line
+- [ ] Other section sources
+    - [ ] http
+    - [ ] git
+    - [ ] ipfs
+    - [ ] ipns
+- [X] colored/styled output
 
-## Installation
+## Installation from source
 
 ```sh
 git clone https://github.com/instantOS/imosid

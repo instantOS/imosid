@@ -1168,6 +1168,7 @@ fn get_comment_sign(filename: &str, firstline: &str) -> String {
     file_name_commentsigns.insert("zshrc", "#");
     file_name_commentsigns.insert("bashrc", "#");
     file_name_commentsigns.insert("Xresources", "!");
+    file_name_commentsigns.insert("xsettingsd", "#");
     file_name_commentsigns.insert("vimrc", "\"");
 
     // get comment syntax via file name
