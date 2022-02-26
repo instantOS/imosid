@@ -928,19 +928,20 @@ impl Specialfile {
                     );
                     return false;
                 }
-                //if no sections are updated, don't do anything to the file system
+                //if no sections are updated, don't write anything to the file system
                 let mut modified = false;
 
+                // true if input file contains all sections that self has
                 let mut allsections = true;
 
                 for i in &self.sections {
+                    allsections = false;
                     let selfname = match &i.name {
                         Some(name) => name.clone(),
                         None => {
                             continue;
                         }
                     };
-                    allsections = false;
                     for u in &inputfile.sections {
                         if let Some(inputname) = u.name.clone() {
                             if inputname == selfname {
@@ -968,16 +969,27 @@ impl Specialfile {
                     );
                     modified = true;
                 } else {
+                    let mut applycounter = 0;
                     for i in &inputfile.sections {
                         if self.applysection(i.clone()) {
+                            applycounter += 1;
                             modified = true;
                         }
                     }
-                    println!(
-                        "applied {} to {}",
-                        inputfile.filename.bold(),
-                        self.filename.bold()
-                    );
+                    if modified {
+                        println!(
+                            "applied {} sections from {} to {}",
+                            applycounter,
+                            self.filename.bold(),
+                            inputfile.filename.bold()
+                        );
+                    } else {
+                        println!(
+                            "applied no sections from {} to {}",
+                            self.filename.bold(),
+                            inputfile.filename.bold()
+                        );
+                    }
                 }
                 return modified;
             }
