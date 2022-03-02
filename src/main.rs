@@ -1355,8 +1355,14 @@ fn main() -> Result<(), std::io::Error> {
                 if let Some(target) = infofile.targetfile {
                     println!("target: {}", &target);
                 }
+                
+                if infofile.modified {
+                    std::process::exit(1);
+                }
+
             } else {
                 println!("file {} not found", filename);
+                std::process::exit(1);
             }
         }
     }
