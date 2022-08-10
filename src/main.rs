@@ -1,6 +1,6 @@
 mod app;
 
-use clap::{crate_version, ArgMatches};
+use clap::ArgMatches;
 use colored::Colorize;
 use dirs::home_dir;
 use regex::Regex;
@@ -24,6 +24,12 @@ enum CommentType {
     TargetInfo,
     HashInfo,
     PermissionInfo,
+}
+
+// Use of a mod or pub mod is not actually necessary.
+pub mod built_info {
+   // The file has been placed there by the build script.
+   include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
 /// A comment that gets interpreted by imosid
@@ -259,12 +265,13 @@ impl Section {
     }
 
     // append string to content
+    //maybe make this a trait?
     fn push_str(&mut self, line: &str) {
         self.content.push_str(line);
         self.content.push('\n');
     }
 
-    // return entire section with formatted marker comments and content
+    /// return entire section with formatted marker comments and content
     fn output(&self, commentsign: &str) -> String {
         let mut outstr = String::new();
         match &self.name {
@@ -299,6 +306,7 @@ impl Section {
     }
 }
 
+// a file containing metadata about an imosid file for file types which do not support comments
 pub struct Metafile {
     hash: String,
     parentfile: String,
@@ -397,6 +405,7 @@ impl Metafile {
     }
 
     // create a new metafile for a file
+    // TODO maybe return result?
     fn from(mut path: PathBuf) -> Metafile {
         //TODO handle result
         let filecontent =
@@ -409,7 +418,7 @@ impl Metafile {
             .into_string()
             .unwrap();
 
-        //TODO don't create metafiles to metafiles
+        //TODO don't create metafiles for metafiles
 
         let filename = format!("{}.imosid.toml", parentname);
 
@@ -417,6 +426,7 @@ impl Metafile {
         path.push(filename);
 
         let mut retfile: Metafile;
+        //Maybe distinguish between new and from path?
         if path.is_file() {
             retfile = Metafile::new(path.clone(), &filecontent).expect("could not create metafile");
             retfile.update();
@@ -427,7 +437,7 @@ impl Metafile {
                 sourcefile: None,
                 hash: String::from(""),
                 parentfile: String::from(&parentname),
-                imosidversion: Version::parse(crate_version!()).unwrap(),
+                imosidversion: Version::parse(built_info::PKG_VERSION).unwrap(),
                 syntaxversion: 0,
                 value: Value::Integer(0),
                 content: String::from(&filecontent),

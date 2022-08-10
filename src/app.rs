@@ -1,46 +1,52 @@
-use clap::{crate_version, App, AppSettings, Arg};
+use clap::{App, AppSettings, Arg};
 
 pub fn build_app() -> App<'static> {
+    // Use of a mod or pub mod is not actually necessary.
+pub mod built_info {
+   // The file has been placed there by the build script.
+   include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
     let inputarg = Arg::new("input")
         .multiple_occurrences(true)
         .short('i')
         .long("input")
         .takes_value(true)
         .required(false)
-        .about("add file to source list");
+        .help("add file to source list");
 
     let metafilearg = Arg::new("metafile")
         .required(false)
         .short('m')
         .long("metafile")
         .takes_value(false)
-        .about("put imosid metadata into a separate file instead of using comments in the file");
+        .help("put imosid metadata into a separate file instead of using comments in the file");
 
     let app = App::new("imosid")
-        .version(crate_version!())
+        .version(built_info::PKG_VERSION)
         .author("paperbenni <paperbenni@gmail.com>")
         .about("instant manager of sections in dotfiles")
-        .arg(Arg::new("syntax").required(false).about("manually set the comment syntax"))
+        .arg(Arg::new("syntax").required(false).help("manually set the comment syntax"))
         .subcommand(
             App::new("update")
-                .about("apply source sections to target")
+                .help("apply source sections to target")
                 .arg(
                     inputarg
                 ).arg(
                     Arg::new("target")
                         .index(1)
                         .required(true)
-                        .about("file to apply updates to")
+                        .help("file to apply updates to")
                 )
                 .arg(Arg::new("print")
                         .short('p')
                         .long("print")
                         .required(false)
-                        .about("only print results, do not write to file")
+                        .help("only print results, do not write to file")
                         .takes_value(false))
                 .arg(
                     Arg::new("section").long("section")
-                        .about("only update section <section>. all sections are included if unspecified")
+                        .help("only update section <section>. all sections are included if unspecified")
                         .multiple_occurrences(true).takes_value(true).required(false)
                 ).setting(AppSettings::ColoredHelp),
         ).subcommand(
@@ -51,7 +57,7 @@ pub fn build_app() -> App<'static> {
                     Arg::new("file")
                         .index(1)
                         .required(true)
-                        .about("file to process")
+                        .help("file to process")
                 )
         ).subcommand(
             App::new("check")
@@ -61,7 +67,7 @@ pub fn build_app() -> App<'static> {
                     Arg::new("directory")
                         .index(1)
                         .required(true)
-                        .about("directory to check")
+                        .help("directory to check")
                 )
         ).subcommand(
             App::new("query")
@@ -69,7 +75,7 @@ pub fn build_app() -> App<'static> {
                 .arg(
                     Arg::new("file")
                         .index(1)
-                        .about("file to search through")
+                        .help("file to search through")
                         .required(true)
                 ).arg(
                     Arg::new("section").
@@ -79,11 +85,11 @@ pub fn build_app() -> App<'static> {
                     ),
         ).subcommand(
             App::new("info").about("list imosid metadata in file").arg(
-                Arg::new("file").index(1).required(true).about("file to get info for")
+                Arg::new("file").index(1).required(true).help("file to get info for")
             )
         ).subcommand(
             App::new("apply").about("apply source to target marked in the file").arg(
-                Arg::new("file").index(1).required(true).about("file to apply")
+                Arg::new("file").index(1).required(true).help("file to apply")
             )
         )
         .setting(AppSettings::ColoredHelp).setting(AppSettings::ArgRequiredElseHelp);
