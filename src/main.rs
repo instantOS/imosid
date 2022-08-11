@@ -78,6 +78,7 @@ impl Specialcomment {
 
                 let sectionname = keywords[0];
                 let keyword = keywords[1];
+                //comment argument, example #...all source ARGUMENT
                 let cargument: Option<String>;
 
                 if keywords.len() > 2 {
@@ -91,7 +92,7 @@ impl Specialcomment {
                     "begin" | "start" => {
                         tmptype = CommentType::SectionBegin;
                     }
-                    "end" => {
+                    "end"| "stop" => {
                         tmptype = CommentType::SectionEnd;
                     }
                     "hash" => {
@@ -107,7 +108,10 @@ impl Specialcomment {
                     "source" => {
                         tmptype = CommentType::SourceInfo;
                         match cargument {
-                            Some(_) => {}
+                            Some(_) => {
+                                //TODO do something
+                                //fetch from file/url/git
+                            }
                             None => {
                                 println!("missing source file on line {}", linenumber);
                                 return Option::None;
@@ -115,6 +119,7 @@ impl Specialcomment {
                         }
                     }
                     "permissions" => {
+                        // permissioms can only be set for the entire file
                         if sectionname != "all" {
                             return Option::None;
                         }
@@ -264,7 +269,7 @@ impl Section {
         self.hash = String::from(format!("{:X}", hasher));
     }
 
-    // append string to content
+    /// append string to content
     //maybe make this a trait?
     fn push_str(&mut self, line: &str) {
         self.content.push_str(line);

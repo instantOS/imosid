@@ -21,6 +21,9 @@ Planned features
     - [ ] ipns
 - [X] colored/styled output
 
+Refactor stuff
+- traits for metafile/specialfile?
+
 ## Installation from source
 
 ```sh
