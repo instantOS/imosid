@@ -15,6 +15,7 @@ use std::os::unix::prelude::PermissionsExt;
 use std::path::{Path, PathBuf};
 use toml::Value;
 use walkdir::WalkDir;
+use std::string::ToString;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum CommentType {
@@ -30,6 +31,11 @@ enum CommentType {
 pub mod built_info {
    // The file has been placed there by the build script.
    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
+trait Hashable {
+    fn finalize(&mut self);
+    fn compile(&mut self) -> bool;
 }
 
 /// A comment that gets interpreted by imosid
@@ -192,29 +198,7 @@ pub struct Section {
     modified: bool,
 }
 
-impl Section {
-    fn new(
-        start: u32,
-        end: u32,
-        name: Option<String>,
-        source: Option<String>,
-        targethash: Option<String>,
-    ) -> Section {
-        Section {
-            name,
-            startline: start,
-            endline: end,
-            source,
-            hash: match &targethash {
-                Some(hash) => String::from(hash),
-                None => String::new(),
-            },
-            targethash,
-            modified: false,
-            content: String::from(""),
-        }
-    }
-
+impl Hashable for Section {
     /// set target hash to current hash
     /// marking the section as unmodified
     /// return false if nothing has changed
@@ -235,15 +219,6 @@ impl Section {
         }
         self.targethash = Option::Some(self.hash.clone());
         true
-    }
-
-    /// anonymous sections are sections without marker comments
-    /// e.g. parts not tracked by imosid
-    fn is_anonymous(&self) -> bool {
-        match &self.name {
-            Some(_) => false,
-            None => true,
-        }
     }
 
     /// generate section hash
@@ -268,6 +243,41 @@ impl Section {
         }
         self.hash = String::from(format!("{:X}", hasher));
     }
+}
+
+impl Section {
+    fn new(
+        start: u32,
+        end: u32,
+        name: Option<String>,
+        source: Option<String>,
+        targethash: Option<String>,
+    ) -> Section {
+        Section {
+            name,
+            startline: start,
+            endline: end,
+            source,
+            hash: match &targethash {
+                Some(hash) => String::from(hash),
+                None => String::new(),
+            },
+            targethash,
+            modified: false,
+            content: String::from(""),
+        }
+    }
+
+
+    /// anonymous sections are sections without marker comments
+    /// e.g. parts not tracked by imosid
+    fn is_anonymous(&self) -> bool {
+        match &self.name {
+            Some(_) => false,
+            None => true,
+        }
+    }
+
 
     /// append string to content
     //maybe make this a trait?
@@ -324,6 +334,24 @@ pub struct Metafile {
     content: String,
     path: PathBuf,
     permissions: Option<u32>,
+}
+
+impl Hashable for Metafile {
+    // check for modifications
+    fn finalize(&mut self) {
+        self.modified = self.hash != self.get_content_hash();
+    }
+
+    fn compile(&mut self) -> bool {
+        let contenthash = self.get_content_hash();
+        self.modified = false;
+        if self.hash == contenthash {
+            false
+        } else {
+            self.hash = contenthash;
+            true
+        }
+    }
 }
 
 impl Metafile {
@@ -466,21 +494,7 @@ impl Metafile {
         format!("{:X}", hasher)
     }
 
-    // check for modifications
-    fn finalize(&mut self) {
-        self.modified = self.hash != self.get_content_hash();
-    }
 
-    fn compile(&mut self) -> bool {
-        let contenthash = self.get_content_hash();
-        self.modified = false;
-        if self.hash == contenthash {
-            false
-        } else {
-            self.hash = contenthash;
-            true
-        }
-    }
 
     // populate toml value with data
     fn update(&mut self) {
@@ -540,6 +554,7 @@ impl Metafile {
 }
 
 pub struct Specialfile {
+    //TODO maybe implement finalize?
     specialcomments: Vec<Specialcomment>,
     sections: Vec<Section>,
     file: File,
@@ -841,7 +856,7 @@ impl Specialfile {
             }
             Ok(mut file) => match &mut self.metafile {
                 None => {
-                    file.write_all(self.output().as_bytes()).unwrap();
+                    file.write_all(self.to_string().as_bytes()).unwrap();
                 }
                 Some(metafile) => {
                     file.write_all(metafile.content.as_bytes()).unwrap();
@@ -1050,7 +1065,42 @@ impl Specialfile {
         }
     }
 
-    fn output(&self) -> String {
+
+    fn applysection(&mut self, section: Section) -> bool {
+        if let Some(_) = &self.metafile {
+            eprintln!(
+                "{}",
+                "cannot apply individual section to file managed by metafile"
+                    .red()
+                    .bold()
+            );
+            return false;
+        }
+        for i in 0..self.sections.len() {
+            let tmpsection = self.sections.get(i).unwrap();
+            if tmpsection.is_anonymous()
+                || section.is_anonymous()
+                || section.modified
+                || tmpsection.modified
+            {
+                continue;
+            }
+            let tmpname = &tmpsection.name.clone().unwrap();
+            if tmpname == &section.name.clone().unwrap() {
+                if &tmpsection.hash == &section.hash {
+                    continue;
+                }
+                self.sections[i] = section;
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+impl ToString for Specialfile {
+    
+    fn to_string(&self) -> String {
         match &self.metafile {
             None => {
                 let mut retstr = String::new();
@@ -1115,37 +1165,6 @@ impl Specialfile {
                 return metafile.content.clone();
             }
         }
-    }
-
-    fn applysection(&mut self, section: Section) -> bool {
-        if let Some(_) = &self.metafile {
-            eprintln!(
-                "{}",
-                "cannot apply individual section to file managed by metafile"
-                    .red()
-                    .bold()
-            );
-            return false;
-        }
-        for i in 0..self.sections.len() {
-            let tmpsection = self.sections.get(i).unwrap();
-            if tmpsection.is_anonymous()
-                || section.is_anonymous()
-                || section.modified
-                || tmpsection.modified
-            {
-                continue;
-            }
-            let tmpname = &tmpsection.name.clone().unwrap();
-            if tmpname == &section.name.clone().unwrap() {
-                if &tmpsection.hash == &section.hash {
-                    continue;
-                }
-                self.sections[i] = section;
-                return true;
-            }
-        }
-        return false;
     }
 }
 
@@ -1595,7 +1614,7 @@ fn main() -> Result<(), std::io::Error> {
             }
 
             if matches.is_present("print") {
-                println!("{}", targetfile.output());
+                println!("{}", targetfile.to_string());
             } else {
                 if modified {
                     targetfile.write_to_file();
@@ -1629,7 +1648,7 @@ fn main() -> Result<(), std::io::Error> {
                             }
                         }
                         None => {
-                            println!("{}", testfile.output());
+                            println!("{}", testfile.to_string());
                         }
                     },
                     Some(metafile) => {
