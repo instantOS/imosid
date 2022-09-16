@@ -12,10 +12,10 @@ codegen-units = 1
 panic = 'abort'
 
 [dependencies]
-clap = "3.2.16"
+clap = "3.2.21"
 rand = "0.8.4"
 sha2 = "0.9.5"
-regex = "1.5.4"
+regex = "1.6.0"
 dirs = "3.0.2"
 colored = "2.0.0"
 toml = "0.5.9"
