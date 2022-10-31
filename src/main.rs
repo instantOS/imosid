@@ -13,6 +13,7 @@ use std::io::{self, prelude::*, BufRead, ErrorKind};
 use std::ops::Deref;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::string::ToString;
 use toml::Value;
 use walkdir::WalkDir;
 
@@ -28,8 +29,13 @@ enum CommentType {
 
 // Use of a mod or pub mod is not actually necessary.
 pub mod built_info {
-   // The file has been placed there by the build script.
-   include!(concat!(env!("OUT_DIR"), "/built.rs"));
+    // The file has been placed there by the build script.
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
+trait Hashable {
+    fn finalize(&mut self);
+    fn compile(&mut self) -> bool;
 }
 
 /// A comment that gets interpreted by imosid
@@ -92,7 +98,7 @@ impl Specialcomment {
                     "begin" | "start" => {
                         tmptype = CommentType::SectionBegin;
                     }
-                    "end"| "stop" => {
+                    "end" | "stop" => {
                         tmptype = CommentType::SectionEnd;
                     }
                     "hash" => {
@@ -192,29 +198,7 @@ pub struct Section {
     modified: bool,
 }
 
-impl Section {
-    fn new(
-        start: u32,
-        end: u32,
-        name: Option<String>,
-        source: Option<String>,
-        targethash: Option<String>,
-    ) -> Section {
-        Section {
-            name,
-            startline: start,
-            endline: end,
-            source,
-            hash: match &targethash {
-                Some(hash) => String::from(hash),
-                None => String::new(),
-            },
-            targethash,
-            modified: false,
-            content: String::from(""),
-        }
-    }
-
+impl Hashable for Section {
     /// set target hash to current hash
     /// marking the section as unmodified
     /// return false if nothing has changed
@@ -235,15 +219,6 @@ impl Section {
         }
         self.targethash = Option::Some(self.hash.clone());
         true
-    }
-
-    /// anonymous sections are sections without marker comments
-    /// e.g. parts not tracked by imosid
-    fn is_anonymous(&self) -> bool {
-        match &self.name {
-            Some(_) => false,
-            None => true,
-        }
     }
 
     /// generate section hash
@@ -267,6 +242,39 @@ impl Section {
             }
         }
         self.hash = String::from(format!("{:X}", hasher));
+    }
+}
+
+impl Section {
+    fn new(
+        start: u32,
+        end: u32,
+        name: Option<String>,
+        source: Option<String>,
+        targethash: Option<String>,
+    ) -> Section {
+        Section {
+            name,
+            startline: start,
+            endline: end,
+            source,
+            hash: match &targethash {
+                Some(hash) => String::from(hash),
+                None => String::new(),
+            },
+            targethash,
+            modified: false,
+            content: String::from(""),
+        }
+    }
+
+    /// anonymous sections are sections without marker comments
+    /// e.g. parts not tracked by imosid
+    fn is_anonymous(&self) -> bool {
+        match &self.name {
+            Some(_) => false,
+            None => true,
+        }
     }
 
     /// append string to content
@@ -324,6 +332,24 @@ pub struct Metafile {
     content: String,
     path: PathBuf,
     permissions: Option<u32>,
+}
+
+impl Hashable for Metafile {
+    // check for modifications
+    fn finalize(&mut self) {
+        self.modified = self.hash != self.get_content_hash();
+    }
+
+    fn compile(&mut self) -> bool {
+        let contenthash = self.get_content_hash();
+        self.modified = false;
+        if self.hash == contenthash {
+            false
+        } else {
+            self.hash = contenthash;
+            true
+        }
+    }
 }
 
 impl Metafile {
@@ -466,22 +492,6 @@ impl Metafile {
         format!("{:X}", hasher)
     }
 
-    // check for modifications
-    fn finalize(&mut self) {
-        self.modified = self.hash != self.get_content_hash();
-    }
-
-    fn compile(&mut self) -> bool {
-        let contenthash = self.get_content_hash();
-        self.modified = false;
-        if self.hash == contenthash {
-            false
-        } else {
-            self.hash = contenthash;
-            true
-        }
-    }
-
     // populate toml value with data
     fn update(&mut self) {
         let mut selfmap = toml::map::Map::new();
@@ -540,6 +550,7 @@ impl Metafile {
 }
 
 pub struct Specialfile {
+    //TODO maybe implement finalize?
     specialcomments: Vec<Specialcomment>,
     sections: Vec<Section>,
     file: File,
@@ -841,7 +852,7 @@ impl Specialfile {
             }
             Ok(mut file) => match &mut self.metafile {
                 None => {
-                    file.write_all(self.output().as_bytes()).unwrap();
+                    file.write_all(self.to_string().as_bytes()).unwrap();
                 }
                 Some(metafile) => {
                     file.write_all(metafile.content.as_bytes()).unwrap();
@@ -1050,7 +1061,40 @@ impl Specialfile {
         }
     }
 
-    fn output(&self) -> String {
+    fn applysection(&mut self, section: Section) -> bool {
+        if let Some(_) = &self.metafile {
+            eprintln!(
+                "{}",
+                "cannot apply individual section to file managed by metafile"
+                    .red()
+                    .bold()
+            );
+            return false;
+        }
+        for i in 0..self.sections.len() {
+            let tmpsection = self.sections.get(i).unwrap();
+            if tmpsection.is_anonymous()
+                || section.is_anonymous()
+                || section.modified
+                || tmpsection.modified
+            {
+                continue;
+            }
+            let tmpname = &tmpsection.name.clone().unwrap();
+            if tmpname == &section.name.clone().unwrap() {
+                if &tmpsection.hash == &section.hash {
+                    continue;
+                }
+                self.sections[i] = section;
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+impl ToString for Specialfile {
+    fn to_string(&self) -> String {
         match &self.metafile {
             None => {
                 let mut retstr = String::new();
@@ -1115,37 +1159,6 @@ impl Specialfile {
                 return metafile.content.clone();
             }
         }
-    }
-
-    fn applysection(&mut self, section: Section) -> bool {
-        if let Some(_) = &self.metafile {
-            eprintln!(
-                "{}",
-                "cannot apply individual section to file managed by metafile"
-                    .red()
-                    .bold()
-            );
-            return false;
-        }
-        for i in 0..self.sections.len() {
-            let tmpsection = self.sections.get(i).unwrap();
-            if tmpsection.is_anonymous()
-                || section.is_anonymous()
-                || section.modified
-                || tmpsection.modified
-            {
-                continue;
-            }
-            let tmpname = &tmpsection.name.clone().unwrap();
-            if tmpname == &section.name.clone().unwrap() {
-                if &tmpsection.hash == &section.hash {
-                    continue;
-                }
-                self.sections[i] = section;
-                return true;
-            }
-        }
-        return false;
     }
 }
 
@@ -1292,317 +1305,306 @@ fn main() -> Result<(), std::io::Error> {
     // parse program arguments using clap
     let matches = app::build_app().get_matches();
 
-    if matches.is_present("compile") {
-        if let Some(ref matches) = matches.subcommand_matches("compile") {
-            let filename = matches.value_of("file").unwrap();
-            if matches.is_present("metafile") {
-                let mut newmetafile = Metafile::from(PathBuf::from(filename));
-                //TODO reduce multiple hash updates
-                newmetafile.compile();
-                newmetafile.write_to_file();
-            } else {
-                if Path::new(filename).is_file() {
-                    let mut testfile = Specialfile::new(filename)?;
-                    if testfile.compile() {
-                        testfile.write_to_file();
-                        println!("compiled {}", &filename.bold());
-                    } else {
-                        println!("{} already compiled", &filename.green());
-                    }
+    if let Some(ref matches) = matches.subcommand_matches("compile") {
+        let filename = matches.value_of("file").unwrap();
+        if matches.is_present("metafile") {
+            let mut newmetafile = Metafile::from(PathBuf::from(filename));
+            //TODO reduce multiple hash updates
+            newmetafile.compile();
+            newmetafile.write_to_file();
+        } else {
+            if Path::new(filename).is_file() {
+                let mut testfile = Specialfile::new(filename)?;
+                if testfile.compile() {
+                    testfile.write_to_file();
+                    println!("compiled {}", &filename.bold());
                 } else {
-                    eprintln!("{}", "file does not exist".red().bold());
+                    println!("{} already compiled", &filename.green());
                 }
+            } else {
+                eprintln!("{}", "file does not exist".red().bold());
             }
         }
     }
 
     // show imosid information about file
-    if matches.is_present("info") {
-        if let Some(ref matches) = matches.subcommand_matches("info") {
-            let filename = matches.value_of("file").unwrap();
-            if Path::new(filename).is_file() {
-                let infofile = Specialfile::new(filename)?;
+    if let Some(ref matches) = matches.subcommand_matches("info") {
+        let filename = matches.value_of("file").unwrap();
+        if Path::new(filename).is_file() {
+            let infofile = Specialfile::new(filename)?;
 
-                match &infofile.metafile {
-                    None => {
-                        let commentsign = &infofile.commentsign;
-                        println!("comment syntax: {}", commentsign);
+            match &infofile.metafile {
+                None => {
+                    let commentsign = &infofile.commentsign;
+                    println!("comment syntax: {}", commentsign);
 
-                        for i in infofile.sections {
-                            if !i.name.is_some() {
-                                continue;
-                            }
-                            let mut outstr: String;
-                            outstr =
-                                format!("{}-{}: {} | ", i.startline, i.endline, i.name.unwrap());
-                            if i.modified {
-                                outstr.push_str(&format!("{}", "modified".red().bold()));
-                            } else {
-                                outstr.push_str(&format!("{}", "ok".green().bold()));
-                            }
-                            match i.source {
-                                Some(source) => {
-                                    outstr.push_str(" | source ");
-                                    outstr.push_str(&source);
-                                }
-                                None => {}
-                            }
-                            println!("{}", &outstr);
+                    for i in infofile.sections {
+                        if !i.name.is_some() {
+                            continue;
                         }
-                    }
-                    Some(metafile) => {
-                        println!("metafile hash: {}", &metafile.hash);
-                        println!(
-                            "{}",
-                            if metafile.modified {
-                                "modified".red()
-                            } else {
-                                "unmodified".green()
+                        let mut outstr: String;
+                        outstr = format!("{}-{}: {} | ", i.startline, i.endline, i.name.unwrap());
+                        if i.modified {
+                            outstr.push_str(&format!("{}", "modified".red().bold()));
+                        } else {
+                            outstr.push_str(&format!("{}", "ok".green().bold()));
+                        }
+                        match i.source {
+                            Some(source) => {
+                                outstr.push_str(" | source ");
+                                outstr.push_str(&source);
                             }
-                        )
+                            None => {}
+                        }
+                        println!("{}", &outstr);
                     }
                 }
-
-                if let Some(permissions) = infofile.permissions {
-                    println!("target file permissions: {}", &permissions);
+                Some(metafile) => {
+                    println!("metafile hash: {}", &metafile.hash);
+                    println!(
+                        "{}",
+                        if metafile.modified {
+                            "modified".red()
+                        } else {
+                            "unmodified".green()
+                        }
+                    )
                 }
-
-                if let Some(target) = infofile.targetfile {
-                    println!("target: {}", &target);
-                }
-            } else {
-                println!("file {} not found", filename);
             }
+
+            if let Some(permissions) = infofile.permissions {
+                println!("target file permissions: {}", &permissions);
+            }
+
+            if let Some(target) = infofile.targetfile {
+                println!("target: {}", &target);
+            }
+
+            if infofile.modified {
+                std::process::exit(1);
+            }
+        } else {
+            println!("file {} not found", filename);
+            std::process::exit(1);
         }
     }
 
-    if matches.is_present("apply") {
-        if let Some(ref matches) = matches.subcommand_matches("apply") {
-            let mut donesomething = false;
-            let targetname = expand_tilde(matches.value_of("file").unwrap().clone());
-            let filepath = Path::new(&targetname);
-            if filepath.is_dir() {
-                for entry in WalkDir::new(&matches.value_of("file").unwrap())
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                {
-                    //TODO do the same as with check
-                    let tmpsourcepath = String::from(&entry.path().display().to_string());
-                    if Path::new(&tmpsourcepath).is_dir()
-                        || tmpsourcepath.ends_with(".imosid.toml")
-                        || tmpsourcepath.contains("/.git/")
-                    {
-                        continue;
-                    }
-                    let tmpsource = match Specialfile::new(&tmpsourcepath) {
-                        Ok(file) => file,
-                        Err(_) => continue,
-                    };
-                    if tmpsource.targetfile.is_some() {
-                        // todo: combine multiple sources applying to one file into one write
-
-                        let targetpath = String::from(&tmpsource.targetfile.clone().unwrap());
-                        let sourcename = &tmpsource.filename.clone();
-                        if create_file(&targetpath) {
-                            // create new file
-                            if Specialfile::create_file(tmpsource) {
-                                println!(
-                                    "applied {} to create {} ",
-                                    &sourcename.green(),
-                                    &targetpath.bold()
-                                );
-                                donesomething = true;
-                            }
-                        } else {
-                            let mut targetfile = match Specialfile::new(&expand_tilde(&targetpath))
-                            {
-                                Ok(file) => file,
-                                Err(_) => {
-                                    println!(
-                                        "{}",
-                                        format!("failed to parse {}", &targetpath).red()
-                                    );
-                                    continue;
-                                }
-                            };
-                            if targetfile.applyfile(&tmpsource) {
-                                targetfile.write_to_file();
-                                donesomething = true;
-                            }
-                        }
-                    } else {
-                        println!(
-                            "{}",
-                            format!("file {} has no target", &tmpsource.filename.bold()).red()
-                        );
-                        continue;
-                    }
-                }
-                if !donesomething {
-                    println!("{}", "nothing to do".bold());
-                }
-                return Ok(());
-            } else if filepath.is_file() {
-                let sourcefile = get_special_file(&matches, "file");
-                if !sourcefile.is_some() {
-                    eprintln!("error: cannot open file");
-                    return Ok(());
-                }
-                let sourcefile = sourcefile.expect("could not open source file")?;
-                match &sourcefile.targetfile {
-                    None => {
-                        println!("No target comment found in {}", &sourcefile.filename);
-                        return Ok(());
-                    }
-                    Some(targetname) => {
-                        let realtargetname = expand_tilde(targetname);
-                        if create_file(targetname) {
-                            println!("created new file {}", targetname.bold());
-                            Specialfile::create_file(sourcefile);
-                        } else {
-                            let mut targetfile = Specialfile::new(&realtargetname)?;
-                            if targetfile.applyfile(&sourcefile) {
-                                targetfile.write_to_file();
-                            }
-                        }
-                    }
-                }
-            } else {
-                eprintln!("{}", "error: cannot open file".red().bold());
-                return Ok(());
-            }
-        }
-    }
-
-    if matches.is_present("check") {
-        if let Some(ref matches) = matches.subcommand_matches("check") {
-            let targetname = expand_tilde(matches.value_of("directory").unwrap().clone());
-            let filepath = Path::new(&targetname);
-            if !filepath.is_dir() {
-                eprintln!("{}", "only directories can be checked".red());
-                return Ok(());
-            }
-
-            let mut anymodified = false;
-
-            for direntry in WalkDir::new(&matches.value_of("directory").unwrap())
+    if let Some(ref matches) = matches.subcommand_matches("apply") {
+        let mut donesomething = false;
+        let targetname = expand_tilde(matches.value_of("file").unwrap().clone());
+        let filepath = Path::new(&targetname);
+        if filepath.is_dir() {
+            for entry in WalkDir::new(&matches.value_of("file").unwrap())
                 .into_iter()
                 .filter_map(|e| e.ok())
             {
-                let tmpsourcepath = String::from(&direntry.path().display().to_string());
-
-                if tmpsourcepath.ends_with(".imosid.toml") || tmpsourcepath.contains("/.git/") {
+                //TODO do the same as with check
+                let tmpsourcepath = String::from(&entry.path().display().to_string());
+                if Path::new(&tmpsourcepath).is_dir()
+                    || tmpsourcepath.ends_with(".imosid.toml")
+                    || tmpsourcepath.contains("/.git/")
+                {
                     continue;
                 }
-
                 let tmpsource = match Specialfile::new(&tmpsourcepath) {
                     Ok(file) => file,
                     Err(_) => continue,
                 };
-                if tmpsource.modified {
-                    println!("{} {}", tmpsource.filename.red().bold(), "modified".red());
-                    anymodified = true;
-                }
-                let mut fileanonymous = true;
-                if !tmpsource.metafile.is_some() {
-                    for i in &tmpsource.sections {
-                        if !i.is_anonymous() {
-                            fileanonymous = false;
+                if tmpsource.targetfile.is_some() {
+                    // todo: combine multiple sources applying to one file into one write
+
+                    let targetpath = String::from(&tmpsource.targetfile.clone().unwrap());
+                    let sourcename = &tmpsource.filename.clone();
+                    if create_file(&targetpath) {
+                        // create new file
+                        if Specialfile::create_file(tmpsource) {
+                            println!(
+                                "applied {} to create {} ",
+                                &sourcename.green(),
+                                &targetpath.bold()
+                            );
+                            donesomething = true;
+                        }
+                    } else {
+                        let mut targetfile = match Specialfile::new(&expand_tilde(&targetpath)) {
+                            Ok(file) => file,
+                            Err(_) => {
+                                println!("{}", format!("failed to parse {}", &targetpath).red());
+                                continue;
+                            }
+                        };
+                        if targetfile.applyfile(&tmpsource) {
+                            targetfile.write_to_file();
+                            donesomething = true;
                         }
                     }
-                    if fileanonymous {
-                        println!(
-                            "{} {}",
-                            tmpsource.filename.yellow().bold(),
-                            "is unmanaged".yellow()
-                        );
+                } else {
+                    println!(
+                        "{}",
+                        format!("file {} has no target", &tmpsource.filename.bold()).red()
+                    );
+                    continue;
+                }
+            }
+            if !donesomething {
+                println!("{}", "nothing to do".bold());
+            }
+            return Ok(());
+        } else if filepath.is_file() {
+            let sourcefile = get_special_file(&matches, "file");
+            if !sourcefile.is_some() {
+                eprintln!("error: cannot open file");
+                return Ok(());
+            }
+            let sourcefile = sourcefile.expect("could not open source file")?;
+            match &sourcefile.targetfile {
+                None => {
+                    println!("No target comment found in {}", &sourcefile.filename);
+                    return Ok(());
+                }
+                Some(targetname) => {
+                    let realtargetname = expand_tilde(targetname);
+                    if create_file(targetname) {
+                        println!("created new file {}", targetname.bold());
+                        Specialfile::create_file(sourcefile);
+                    } else {
+                        let mut targetfile = Specialfile::new(&realtargetname)?;
+                        if targetfile.applyfile(&sourcefile) {
+                            targetfile.write_to_file();
+                        }
                     }
                 }
             }
-            if !anymodified {
-                println!("{}", "no modified files".green());
-            }
+        } else {
+            eprintln!("{}", "error: cannot open file".red().bold());
+            return Ok(());
         }
     }
 
-    if matches.is_present("update") {
-        if let Some(ref matches) = matches.subcommand_matches("update") {
-            //TODO multiple input files
+    if let Some(ref matches) = matches.subcommand_matches("check") {
+        let targetname = expand_tilde(matches.value_of("directory").unwrap().clone());
+        let filepath = Path::new(&targetname);
+        if !filepath.is_dir() {
+            eprintln!("{}", "only directories can be checked".red());
+            return Ok(());
+        }
 
-            let mut modified = false;
+        let mut anymodified = false;
 
-            let mut targetfile = get_special_file(matches, "target").unwrap()?;
+        for direntry in WalkDir::new(&matches.value_of("directory").unwrap())
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let tmpsourcepath = String::from(&direntry.path().display().to_string());
 
-            if matches.is_present("input") {
-                let inputfile = get_special_file(matches, "input").unwrap()?;
-                modified = targetfile.applyfile(&inputfile);
-            } else {
-                match &mut targetfile.metafile {
-                    None => {
-                        if matches.value_of("target").unwrap() == matches.value_of("input").unwrap()
-                        {
-                            return Ok(());
-                        }
-                        // cache specialfiles to avoid multiple fs calls
-                        let mut applymap: HashMap<&String, Specialfile> = HashMap::new();
-                        let mut applyvec = Vec::new();
+            if tmpsourcepath.ends_with(".imosid.toml") || tmpsourcepath.contains("/.git/") {
+                continue;
+            }
 
-                        for i in &targetfile.sections {
-                            if let Some(source) = &i.source {
-                                if !applymap.contains_key(source) {
-                                    match Specialfile::new(source) {
-                                        Ok(applyfile) => {
-                                            applymap.insert(source, applyfile);
-                                        }
-                                        Err(_) => {
-                                            println!("failed to apply section {}", source);
-                                            continue;
-                                        }
-                                    }
-                                }
-                                if applymap.contains_key(source) {
-                                    applyvec.push(
-                                        applymap
-                                            .get(source)
-                                            .unwrap()
-                                            .clone()
-                                            .get_section(source)
-                                            .unwrap(),
-                                    );
-                                }
-                            }
-                        }
-
-                        for i in applyvec.iter() {
-                            targetfile.applysection(i.clone());
-                        }
+            let tmpsource = match Specialfile::new(&tmpsourcepath) {
+                Ok(file) => file,
+                Err(_) => continue,
+            };
+            if tmpsource.modified {
+                println!("{} {}", tmpsource.filename.red().bold(), "modified".red());
+                anymodified = true;
+            }
+            let mut fileanonymous = true;
+            if !tmpsource.metafile.is_some() {
+                for i in &tmpsource.sections {
+                    if !i.is_anonymous() {
+                        fileanonymous = false;
                     }
-                    Some(metafile) => {
-                        if !metafile.modified {
-                            if let Some(sourcefile) = &metafile.sourcefile {
-                                match Specialfile::new(sourcefile) {
-                                    Ok(file) => {
-                                        modified = targetfile.applyfile(&file);
+                }
+                if fileanonymous {
+                    println!(
+                        "{} {}",
+                        tmpsource.filename.yellow().bold(),
+                        "is unmanaged".yellow()
+                    );
+                }
+            }
+        }
+        if !anymodified {
+            println!("{}", "no modified files".green());
+        }
+    }
+
+    if let Some(ref matches) = matches.subcommand_matches("update") {
+        //TODO multiple input files
+
+        let mut modified = false;
+
+        let mut targetfile = get_special_file(matches, "target").unwrap()?;
+
+        if matches.is_present("input") {
+            let inputfile = get_special_file(matches, "input").unwrap()?;
+            modified = targetfile.applyfile(&inputfile);
+        } else {
+            match &mut targetfile.metafile {
+                None => {
+                    if matches.value_of("target").unwrap() == matches.value_of("input").unwrap() {
+                        return Ok(());
+                    }
+                    // cache specialfiles to avoid multiple fs calls
+                    let mut applymap: HashMap<&String, Specialfile> = HashMap::new();
+                    let mut applyvec = Vec::new();
+
+                    for i in &targetfile.sections {
+                        if let Some(source) = &i.source {
+                            if !applymap.contains_key(source) {
+                                match Specialfile::new(source) {
+                                    Ok(applyfile) => {
+                                        applymap.insert(source, applyfile);
                                     }
                                     Err(_) => {
-                                        println!("failed to apply metafile source {}", sourcefile);
+                                        println!("failed to apply section {}", source);
+                                        continue;
                                     }
+                                }
+                            }
+                            if applymap.contains_key(source) {
+                                applyvec.push(
+                                    applymap
+                                        .get(source)
+                                        .unwrap()
+                                        .clone()
+                                        .get_section(source)
+                                        .unwrap(),
+                                );
+                            }
+                        }
+                    }
+
+                    for i in applyvec.iter() {
+                        targetfile.applysection(i.clone());
+                    }
+                }
+                Some(metafile) => {
+                    if !metafile.modified {
+                        if let Some(sourcefile) = &metafile.sourcefile {
+                            match Specialfile::new(sourcefile) {
+                                Ok(file) => {
+                                    modified = targetfile.applyfile(&file);
+                                }
+                                Err(_) => {
+                                    println!("failed to apply metafile source {}", sourcefile);
                                 }
                             }
                         }
                     }
                 }
             }
+        }
 
-            if matches.is_present("print") {
-                println!("{}", targetfile.output());
+        if matches.is_present("print") {
+            println!("{}", targetfile.to_string());
+        } else {
+            if modified {
+                targetfile.write_to_file();
+                println!("updated file");
             } else {
-                if modified {
-                    targetfile.write_to_file();
-                    println!("updated file");
-                } else {
-                    println!("no updates necessary");
-                }
+                println!("no updates necessary");
             }
         }
     }
@@ -1629,7 +1631,7 @@ fn main() -> Result<(), std::io::Error> {
                             }
                         }
                         None => {
-                            println!("{}", testfile.output());
+                            println!("{}", testfile.to_string());
                         }
                     },
                     Some(metafile) => {
