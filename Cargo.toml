@@ -4,6 +4,10 @@ version = "0.0.0-beta7"
 authors = ["paperbenni <paperbenni@gmail.com>"]
 build = "build.rs"
 edition = "2021"
+license = "GPL-2.0"
+description = "a config file manager that leaves the user alone"
+documentation = "https://instantos.io/docs"
+repository = "https://github.com/instantOS/imosid"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
