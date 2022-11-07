@@ -1,11 +1,13 @@
 # imosid
 
+( Instant Manager Of Sections In Dotfiles )
+
+A config file manager that leaves the user alone
+
 ## Links
 
 - Docs: instantos.io/docs/development/imosid
-
-
-instant manager of sections in dotfiles
+- Arch package release available from: https://packages.instantos.io/
 
 [![asciicast](https://asciinema.org/a/423508.svg)](https://asciinema.org/a/423508)
 
@@ -27,12 +29,6 @@ Refactor stuff
 ## Installation from source
 
 ```sh
-git clone https://github.com/instantOS/imosid
-cd imosid
-cargo build --release
+cargo install --git https://github.com/instantos/imosid
 ```
-## Disclaimer
-
-**imosid is my first time using rust, the program is in an extremely basic state.
-Syntax and options are still subject to change**
 
