@@ -6,7 +6,7 @@ A config file manager that leaves the user alone
 
 ## Links
 
-- Docs: instantos.io/docs/development/imosid
+- Docs: https://instantos.io/docs/development/imosid
 - Arch package release available from: https://packages.instantos.io/
 
 [![asciicast](https://asciinema.org/a/423508.svg)](https://asciinema.org/a/423508)
