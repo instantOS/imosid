@@ -6,7 +6,6 @@ use crate::metafile::MetaFile;
 use crate::section::{NamedSectionData, Section, SectionData};
 use colored::Colorize;
 use regex::Regex;
-use std::clone;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
@@ -185,7 +184,7 @@ impl DotFile {
             sections.remove(i);
         }
 
-        let mut modified = false;
+        let modified = false;
         // introduce anonymous sections
         if sections.len() > 0 {
             let mut currentline = 1;
@@ -219,7 +218,7 @@ impl DotFile {
                 } else if c.linenumber < i.get_data().startline {
                     continue;
                 }
-                i.push_str(&c.content);
+                i.push_line(&c.content);
             }
             i.finalize();
             //TODO: deal with "modified" variable
@@ -327,7 +326,7 @@ impl DotFile {
         }
 
         for section in &self.sections {
-            if let Section::Named(data, named_data) = section {
+            if let Section::Named(_, named_data) = section {
                 if let Some(source) = &named_data.source {
                     if !applymap.contains_key(source) {
                         match DotFile::new(source) {
@@ -582,7 +581,7 @@ impl DotFile {
                 let mut modified = false;
 
                 // true if input file contains all sections that self has
-                let mut allsections = self.has_same_sections(&inputfile);
+                let allsections = self.has_same_sections(&inputfile);
 
                 if !self.modified && allsections {
                     // copy entire file contents if all sections are unmodified
@@ -675,7 +674,7 @@ impl DotFile {
 
         for section_index in 0..self.sections.len() {
             let tmpsection = self.sections.get(section_index).unwrap();
-            if let Section::Named(src_data, src_named_data) = tmpsection {
+            if let Section::Named(_, src_named_data) = tmpsection {
                 if src_named_data.name.eq(&named_data.name) {
                     self.sections[section_index] = Section::Named(sectiondata, named_data);
                     return true;
@@ -699,7 +698,7 @@ impl DotFile {
     fn get_property_comments(&self) -> String {
         let mut retstr = String::new();
         // TODO: do same thing with all "all" section comments
-        if let Some(targetfile) = &self.targetfile {
+        if self.targetfile.is_some() {
             retstr.push_str(&Specialcomment::new_string(
                 &self.commentsign,
                 CommentType::TargetInfo,
@@ -726,17 +725,12 @@ impl ToString for DotFile {
                     Some(hashbang) => {
                         retstr.push_str(&format!("{}\n", hashbang));
                         retstr.push_str(&self.get_property_comments());
-                        retstr.push_str(
-                            &self
-                                .sections
-                                .get(0)
-                                .unwrap()
-                                .get_data()
-                                .content
-                                .lines()
-                                .collect::<Vec<&str>>()[1..]
-                                .join("\n"),
-                        );
+                        let firstcontent = &self.sections.get(0).unwrap().get_data().content;
+                        retstr
+                            .push_str(&firstcontent.lines().collect::<Vec<&str>>()[1..].join("\n"));
+                        if firstcontent.lines().count() > 1 {
+                            retstr.push_str("\n");
+                        }
                         outputsections = &self.sections[1..];
                     }
                     None => {
@@ -786,7 +780,7 @@ fn get_comment_sign(filename: &str, firstline: &str) -> String {
         None => {}
     }
 
-    let mut file_type_commentsigns: HashMap<&str, &str> = HashMap::from([
+    let file_type_commentsigns: HashMap<&str, &str> = HashMap::from([
         ("py", "#"),
         ("sh", "#"),
         ("zsh", "#"),
@@ -822,7 +816,7 @@ fn get_comment_sign(filename: &str, firstline: &str) -> String {
 
     // get comment syntax via #!/hashbang
 
-    let mut file_hashbang_commentsigns: HashMap<&str, &str> = HashMap::from([
+    let file_hashbang_commentsigns: HashMap<&str, &str> = HashMap::from([
         ("python", "#"),
         ("sh", "#"),
         ("bash", "#"),

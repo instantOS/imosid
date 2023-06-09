@@ -105,13 +105,13 @@ impl Section {
 
     /// append string to content
     //maybe make this a trait?
-    pub fn push_str(&mut self, line: &str) {
+    pub fn push_line(&mut self, line: &str) {
         match self {
             Section::Named(data, _) => data,
             Section::Anonymous(data) => data,
         }
         .content
-        .push_str(line)
+        .push_str(format!("{}\n", line).as_str());
     }
 
     /// return entire section with formatted marker comments and content

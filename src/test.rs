@@ -57,8 +57,8 @@ testing123
 ";
 
         let mut testsection = Section::new(1, 10, "test".to_string(), None, "adsasd".to_string());
-        testsection.push_str("hello world");
-        testsection.push_str("testing123");
+        testsection.push_line("hello world");
+        testsection.push_line("testing123");
         testsection.finalize();
         testsection.compile();
         if let Section::Named(_, named_data) = &testsection {
