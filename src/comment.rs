@@ -155,10 +155,7 @@ impl Specialcomment {
                         return Option::None;
                     }
                 }
-                _ => {
-                    println!("warning: incomplete imosid comment on {}", linenumber);
-                    return Option::None;
-                }
+                _ => {}
             }
 
             return Some(Specialcomment {
