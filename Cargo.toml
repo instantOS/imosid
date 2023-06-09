@@ -1,6 +1,6 @@
 [package]
 name = "imosid"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 build = "build.rs"
 authors = ["paperbenni <paperbenni@gmail.com>"]
