@@ -1,31 +1,37 @@
 [package]
 name = "imosid"
-version = "0.0.0-beta7"
-authors = ["paperbenni <paperbenni@gmail.com>"]
-build = "build.rs"
+version = "0.0.1"
 edition = "2021"
+build = "build.rs"
+authors = ["paperbenni <paperbenni@gmail.com>"]
 license = "GPL-2.0"
 description = "a config file manager that leaves the user alone"
 documentation = "https://instantos.io/docs"
 repository = "https://github.com/instantOS/imosid"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [profile.release]
 codegen-units = 1
 panic = 'abort'
 
+
 [dependencies]
-clap = "3.2.21"
-rand = "0.8.4"
-sha2 = "0.9.5"
-regex = "1.6.0"
-dirs = "3.0.2"
 colored = "2.0.0"
-toml = "0.5.9"
-semver = "1.0.13"
-walkdir = "2.3.2"
+regex = "1.8.4"
+sha256 = "1.1.3"
+semver = "1.0.17"
+walkdir = "2.3.3"
+toml = "0.7.4"
+tempdir = "0.3.7"
+home = "0.5.5"
+
+[dependencies.clap]
+version = "4.3.2"
+features = ["cargo"]
 
 [build-dependencies]
-built = "0.5.1"
+built = "0.5.2"
+
+
+
 

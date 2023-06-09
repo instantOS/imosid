@@ -1,7 +1,5 @@
 # imosid
 
-( Instant Manager Of Sections In Dotfiles )
-
 A config file manager that leaves the user alone
 
 ## Links
@@ -26,9 +24,16 @@ Planned features
 Refactor stuff
 - traits for metafile/specialfile?
 
-## Installation from source
+## Installation 
+
+### Crates.io
+
+```sh
+cargo install imosid
+```
+
+### From source
 
 ```sh
 cargo install --git https://github.com/instantos/imosid
 ```
-

@@ -1,98 +1,125 @@
-use clap::{App, AppSettings, Arg};
+use clap::{arg, command, value_parser, Arg, ArgAction, ArgMatches, ColorChoice, Command};
+use std::path::PathBuf;
 
-pub fn build_app() -> App<'static> {
-    // Use of a mod or pub mod is not actually necessary.
-pub mod built_info {
-   // The file has been placed there by the build script.
-   include!(concat!(env!("OUT_DIR"), "/built.rs"));
+pub fn get_vec_args<'a>(matches: &'a ArgMatches, name: &str) -> Vec<&'a str> {
+    let sections = matches
+        .get_many::<String>(name)
+        .unwrap_or_default()
+        .map(|v| v.as_str())
+        .collect::<Vec<_>>();
+    return sections;
 }
 
-    let inputarg = Arg::new("input")
-        .multiple_occurrences(true)
-        .short('i')
-        .long("input")
-        .takes_value(true)
-        .required(false)
-        .help("add file to source list");
-
-    let metafilearg = Arg::new("metafile")
-        .required(false)
-        .short('m')
-        .long("metafile")
-        .takes_value(false)
-        .help("put imosid metadata into a separate file instead of using comments in the file");
-
-    let app = App::new("imosid")
-        .version(built_info::PKG_VERSION)
-        .author("paperbenni <paperbenni@gmail.com>")
+pub fn build_app() -> Command {
+    command!()
+        .color(ColorChoice::Always)
+        .subcommand_required(true)
+        .arg_required_else_help(true)
         .about("instant manager of sections in dotfiles")
-        .arg(Arg::new("syntax").required(false).help("manually set the comment syntax"))
+        .author("paperbenni <paperbenni@gmail.com>")
         .subcommand(
-            App::new("update")
-                .help("apply source sections to target")
-                .arg(
-                    inputarg
-                ).arg(
-                    Arg::new("target")
-                        .index(1)
-                        .required(true)
-                        .help("file to apply updates to")
-                )
-                .arg(Arg::new("print")
-                        .short('p')
-                        .long("print")
-                        .required(false)
-                        .help("only print results, do not write to file")
-                        .takes_value(false))
-                .arg(
-                    Arg::new("section").long("section")
-                        .help("only update section <section>. all sections are included if unspecified")
-                        .multiple_occurrences(true).takes_value(true).required(false)
-                ).setting(AppSettings::ColoredHelp),
-        ).subcommand(
-            App::new("compile")
-                .about("add hashes to sections in source file")
-                .setting(AppSettings::ColoredHelp).arg(&metafilearg)
+            Command::new("test")
+                .about("testing stuff")
+                .arg(arg!(-l --list "list test values").action(ArgAction::SetTrue)),
+        )
+        .subcommand(
+            Command::new("compile")
+                .about("compile file")
                 .arg(
                     Arg::new("file")
-                        .index(1)
+                        .value_parser(value_parser!(PathBuf))
                         .required(true)
-                        .help("file to process")
+                        .help("file to compile"),
                 )
-        ).subcommand(
-            App::new("check")
-                .about("check folder for modified files")
-                .setting(AppSettings::ColoredHelp)
                 .arg(
-                    Arg::new("directory")
-                        .index(1)
+                    arg!(-m --metafile "use meta file")
+                        .required(false)
+                        .action(ArgAction::SetTrue),
+                ),
+        )
+        .subcommand(
+            Command::new("update")
+                .about("update sections from sources")
+                .arg(
+                    arg!(-f --file "file to update")
                         .required(true)
-                        .help("directory to check")
+                        .value_parser(value_parser!(PathBuf)),
                 )
-        ).subcommand(
-            App::new("query")
+                .arg(
+                    arg!(-p --print "only print result, do not write to file")
+                        .required(false)
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    arg!(-s --section "only update section, default is all")
+                        .required(false)
+                        .action(ArgAction::Append),
+                ),
+        )
+        .subcommand(
+            Command::new("query")
                 .about("print section from file")
                 .arg(
-                    Arg::new("file")
-                        .index(1)
-                        .help("file to search through")
+                    arg!(--file "file to search through")
                         .required(true)
-                ).arg(
-                    Arg::new("section").
-                        required(false).short('s').
-                        long("section").
-                        multiple_occurrences(true).takes_value(true)
-                    ),
-        ).subcommand(
-            App::new("info").about("list imosid metadata in file").arg(
-                Arg::new("file").index(1).required(true).help("file to get info for")
-            )
-        ).subcommand(
-            App::new("apply").about("apply source to target marked in the file").arg(
-                Arg::new("file").index(1).required(true).help("file to apply")
-            )
+                        .value_parser(value_parser!(PathBuf)),
+                )
+                .arg(
+                    arg!(--section "section to print")
+                        .required(true)
+                        .action(ArgAction::Append)
+                        .value_parser(value_parser!(String)),
+                ),
         )
-        .setting(AppSettings::ColoredHelp).setting(AppSettings::ArgRequiredElseHelp);
-
-    return app;
+        .subcommand(
+            Command::new("info")
+                .about("list imosid metadate in file")
+                .arg(
+                    Arg::new("file")
+                        .required(true)
+                        .help("file to get info for")
+                        .value_parser(value_parser!(PathBuf)),
+                ),
+        )
+        .subcommand(
+            Command::new("apply")
+                .about("apply source to target marked in the file")
+                .arg(
+                    Arg::new("file")
+                        .help("file or directory to apply")
+                        .required(true)
+                        .value_parser(value_parser!(PathBuf)),
+                ),
+        )
+        .subcommand(
+            Command::new("delete")
+                .about("delete section from file")
+                .arg(
+                    Arg::new("file")
+                        .required(true)
+                        .help("file to delete section from")
+                        .value_parser(value_parser!(PathBuf)),
+                )
+                .arg(
+                    arg!(-p --print "only print result, do not write to file")
+                        .required(false)
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    arg!(-s --section "section to delete")
+                        .required(true)
+                        .action(ArgAction::Append)
+                        .value_parser(value_parser!(String))
+                        .action(ArgAction::Append),
+                ),
+        )
+        .subcommand(
+            Command::new("check")
+                .about("check directory for modified files")
+                .arg(
+                    arg!(--directory "directory to check")
+                        .required(true)
+                        .value_parser(value_parser!(PathBuf)),
+                ),
+        )
 }
