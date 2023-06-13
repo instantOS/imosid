@@ -469,7 +469,7 @@ impl DotFile {
     }
 
     pub fn is_anonymous(&self) -> bool {
-        self.count_named_sections() > 0
+        self.count_named_sections() == 0
     }
 
     pub fn apply(&self) -> ApplyResult {

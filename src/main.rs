@@ -166,14 +166,14 @@ fn main() -> Result<(), std::io::Error> {
         }
 
         Some(("apply", apply_matches)) => {
-            let filename = apply_matches.get_one::<PathBuf>("file").unwrap();
-            if filename.is_dir() {
-                if !apply_config_dir(filename) {
+            let path = apply_matches.get_one::<PathBuf>("file").unwrap();
+            if path.is_dir() {
+                if !apply_config_dir(path) {
                     println!("{}", "nothing to do".bold());
                 }
                 return Ok(());
-            } else if filename.is_file() {
-                let tmpsource = get_dotfile!(filename);
+            } else if path.is_file() {
+                let tmpsource = get_dotfile!(path);
                 tmpsource.apply();
             } else {
                 eprintln!("{}", "file does not exist".red().bold());
