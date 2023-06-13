@@ -538,7 +538,11 @@ impl DotFile {
                 return false;
             } else {
                 if other.is_anonymous() {
-                    eprintln!("{} {}", other.filename.red(), "is unmanaged, cannot apply");
+                    eprintln!(
+                        "{} {}",
+                        other.filename.red(),
+                        "is unmanaged, cannot be applied"
+                    );
                     return false;
                 } else {
                     return true;
@@ -698,14 +702,22 @@ impl DotFile {
     fn get_property_comments(&self) -> String {
         let mut retstr = String::new();
         // TODO: do same thing with all "all" section comments
-        if self.targetfile.is_some() {
+        if let Some(target) = &self.targetfile {
             retstr.push_str(&Specialcomment::new_string(
                 &self.commentsign,
                 CommentType::TargetInfo,
                 "all",
-                None,
+                Some(&target),
             ));
-            retstr.push_str("\n");
+        }
+
+        if let Some(permissions) = &self.permissions {
+            retstr.push_str(&Specialcomment::new_string(
+                &self.commentsign,
+                CommentType::PermissionInfo,
+                "all",
+                Some(&permissions.to_string()),
+            ));
         }
 
         retstr
