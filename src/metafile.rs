@@ -113,8 +113,6 @@ impl MetaFile {
             let permint = u32::from_str_radix(&format!("{}", permissions + 1000000), 8).unwrap();
             perms.set_mode(permint);
             fs::set_permissions(&parentpath, perms).expect("failed to set permissions");
-        } else {
-            println!("no permissions");
         }
     }
 

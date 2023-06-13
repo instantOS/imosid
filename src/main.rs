@@ -2,7 +2,7 @@ mod app;
 mod dotwalker;
 mod test;
 use colored::Colorize;
-use dotwalker::{walk_config_dir, walk_dotfiles};
+use dotwalker::{apply_config_dir, walk_config_dir, walk_dotfiles};
 mod comment;
 mod commentmap;
 mod contentline;
@@ -166,30 +166,9 @@ fn main() -> Result<(), std::io::Error> {
         }
 
         Some(("apply", apply_matches)) => {
-            let mut donesomething = false;
             let filename = apply_matches.get_one::<PathBuf>("file").unwrap();
             if filename.is_dir() {
-                for entry in walk_config_dir(filename) {
-                    let entrypath = entry.path().to_path_buf();
-                    let entrystring = entry.path().to_str();
-                    let tmpsource = match DotFile::from_pathbuf(&entry.path().to_path_buf()) {
-                        Ok(file) => file,
-                        Err(_) => {
-                            eprintln!(
-                                "could not open file {}",
-                                &entry.path().to_str().unwrap().red()
-                            );
-                            continue;
-                        }
-                    };
-                    match tmpsource.apply() {
-                        ApplyResult::Changed => {
-                            donesomething = true;
-                        }
-                        _ => {}
-                    }
-                }
-                if !donesomething {
+                if !apply_config_dir(filename) {
                     println!("{}", "nothing to do".bold());
                 }
                 return Ok(());
