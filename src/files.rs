@@ -394,9 +394,28 @@ impl DotFile {
         didsomething
     }
 
-    pub fn write_to_file(&mut self) {
+    pub fn write_to_file(&mut self, force: bool) {
         let targetname = &expand_tilde(&self.filename);
         let newfile = File::create(targetname);
+        if force {
+            match newfile {
+                Err(_) => {
+                    println!("error: could not write to file {}", &self.filename);
+                    panic!("write_to_file");
+                }
+                Ok(mut file) => match &mut self.metafile {
+                    None => {
+                        file.write_all(self.to_string().as_bytes()).unwrap();
+                    }
+                    Some(metafile) => {
+                        file.write_all(metafile.content.as_bytes()).unwrap();
+                        metafile.write_to_file();
+                    }
+                },
+            }
+        } else {
+            // existing code
+        }
         match newfile {
             Err(_) => {
                 println!("error: could not write to file {}", &self.filename);
@@ -575,8 +594,8 @@ impl DotFile {
     // return true if file will be modified
     // applies other file to self
     // TODO: return result
-    pub fn applyfile(&mut self, inputfile: &DotFile) -> bool {
-        if !self.can_apply(inputfile) {
+    pub fn applyfile(&mut self, inputfile: &DotFile, force: bool) -> bool {
+        if force || !self.can_apply(inputfile) {
             return false;
         }
         match &mut self.metafile {
@@ -630,7 +649,7 @@ impl DotFile {
 
             // apply entire content if file is managed by metafile
             Some(metafile) => {
-                if !metafile.modified {
+                if !force && !metafile.modified {
                     if let Some(applymetafile) = &inputfile.metafile {
                         if applymetafile.modified {
                             println!("source file {} modified", &applymetafile.parentfile);
@@ -650,7 +669,7 @@ impl DotFile {
                         );
                         return true;
                     }
-                } else {
+                } else if !force {
                     println!(
                         "{}",
                         format!("target {} modified, skipping", &self.filename.bold()).yellow()

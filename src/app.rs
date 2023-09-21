@@ -89,6 +89,14 @@ pub fn build_app() -> Command {
                         .help("file or directory to apply")
                         .required(true)
                         .value_parser(value_parser!(PathBuf)),
+                )
+                .arg(
+                    Arg::new("force")
+                        .short('f')
+                        .long("force")
+                        .about("force apply even if there are conflicts")
+                        .required(false)
+                        .takes_value(false),
                 ),
         )
         .subcommand(
